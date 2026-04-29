@@ -34,9 +34,20 @@ func main() {
 	fmt.Printf(string(stdout))
 
 	requestURL := "http://localhost:8080/v1/chat/completions"
-	var jsonStr = []byte(`{ "messages": [
-      {"role": "user", "content": "Who are you?"}
-    ]}`)
+	jsonStr := []byte(fmt.Sprintf(`{
+    "model": "local-model",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a consultant time-tracking assistant. You receive raw git commit logs and produce a structured daily work summary for use in a timesheet."
+      },
+      {
+        "role": "user",
+        "content": %q
+      }
+    ],
+    "temperature": 0.2
+  }`, string(stdout)))
 
 	req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
 	if err != nil {
