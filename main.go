@@ -41,10 +41,9 @@ func main() {
 		since = "--since=" + now.Format("2006-01-02")
 	}
 
-	git := "git"
-	log := "log"
-
-	cmd := exec.Command(git, log, since)
+	cmd := exec.Command("git", "log", since, "--no-merges", "--decorate=short", "--stat",
+		"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
+		"--date=format:%Y-%m-%d %H:%M")
 	stdout, err := cmd.Output()
 
 	if err != nil {
