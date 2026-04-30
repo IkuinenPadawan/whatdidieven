@@ -36,9 +36,9 @@ func main() {
 
 	switch os.Args[1] {
 	case "today":
-		since = "--since=" + now.Format("2006-01-21")
+		since = "--since=" + now.Format("2006-01-02")
 	default:
-		since = "--since=" + now.Format("2006-01-21")
+		since = "--since=" + now.Format("2006-01-02")
 	}
 
 	git := "git"
