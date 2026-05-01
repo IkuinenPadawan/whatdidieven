@@ -100,7 +100,10 @@ func main() {
 		return
 	}
 
-	requestURL := "http://localhost:8080/v1/chat/completions"
+	requestURL := os.Getenv("WHATDIDIEVEN_API_URL")
+	if requestURL == "" {
+		requestURL = "http://localhost:8080/v1/chat/completions"
+	}
 	jsonStr := []byte(fmt.Sprintf(`{
     "model": "local-model",
     "messages": [
