@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,13 +30,21 @@ Rules:
 - Do not invent work. Only summarize what the commits indicate.
 - End with a grand total across all days.`
 
+type Response struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+}
+
 func main() {
 	var since string
 	now := time.Now()
 
 	switch os.Args[1] {
 	case "today":
-		since = "--since=" + now.Format("2006-01-02")
+		since = "--since=2026-01-01" //+ now.Format("2006-01-02")
 	default:
 		since = "--since=" + now.Format("2006-01-02")
 	}
@@ -86,10 +94,11 @@ func main() {
 	fmt.Printf("client: got response!\n")
 	fmt.Printf("client: status code: %d\n", res.StatusCode)
 
-	resBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		fmt.Printf("client: could not read response body: %s\n", err)
+	var r Response
+	if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
+		fmt.Printf("error decoding response: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("client: response body: %s\n", resBody)
+	fmt.Println(r.Choices[0].Message.Content)
+
 }
