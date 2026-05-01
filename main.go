@@ -75,7 +75,7 @@ func main() {
 	var since string
 	now := time.Now()
 
-	if len(os.Args[1]) > 1 {
+	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "today":
 			since = "--since=" + now.Format("2006-01-02")
