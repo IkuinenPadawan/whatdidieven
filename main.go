@@ -42,10 +42,18 @@ func main() {
 	var since string
 	now := time.Now()
 
-	switch os.Args[1] {
-	case "today":
-		since = "--since=2026-01-01" //+ now.Format("2006-01-02")
-	default:
+	if len(os.Args[1]) > 1 {
+		switch os.Args[1] {
+		case "today":
+			since = "--since=" + now.Format("2006-01-02")
+		case "week":
+			daysBack := (int(now.Weekday()) - 1 + 7) % 7
+			lastMonday := now.AddDate(0, 0, -daysBack)
+			since = "--since=" + lastMonday.Format("2006-01-02")
+		default:
+			since = "--since=" + now.Format("2006-01-02")
+		}
+	} else {
 		since = "--since=" + now.Format("2006-01-02")
 	}
 
