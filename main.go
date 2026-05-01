@@ -99,7 +99,6 @@ func main() {
 		fmt.Printf("error: %v\n", err)
 		return
 	}
-	fmt.Printf(string(stdout))
 
 	requestURL := "http://localhost:8080/v1/chat/completions"
 	jsonStr := []byte(fmt.Sprintf(`{
@@ -132,14 +131,10 @@ func main() {
 
 	defer res.Body.Close()
 
-	fmt.Printf("client: got response!\n")
-	fmt.Printf("client: status code: %d\n", res.StatusCode)
-
 	var r Response
 	if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
 		fmt.Printf("error decoding response: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println(r.Choices[0].Message.Content)
-
 }
