@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -120,6 +121,7 @@ func readConfig() Config {
 
 func main() {
 	createConfigFile()
+	config := readConfig()
 	var since string
 	now := time.Now()
 
@@ -149,14 +151,20 @@ func main() {
 	}
 	gitAuthor := string(out)
 
-	cmd := exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
-		"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-		"--date=format:%Y-%m-%d %H:%M",
-		"--author=", gitAuthor)
-	stdout, err := cmd.Output()
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		return
+	var message []string
+
+	for _, repo := range config.Repos {
+		cmd := exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
+			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
+			"--date=format:%Y-%m-%d %H:%M",
+			"--author="+gitAuthor)
+		cmd.Dir = repo
+		stdout, err := cmd.Output()
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			return
+		}
+		message = append(message, string(stdout))
 	}
 
 	requestURL := os.Getenv("WHATDIDIEVEN_API_URL")
@@ -176,7 +184,7 @@ func main() {
       }
     ],
     "temperature": 0.2
-  }`, systemPrompt, string(stdout)))
+  }`, systemPrompt, strings.Join(message, "\n")))
 
 	req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
 	if err != nil {
