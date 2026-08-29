@@ -121,6 +121,30 @@ func readConfig() Config {
 	return config
 }
 
+func buildGitCommand(since string, until string) *exec.Cmd {
+	var cmd *exec.Cmd
+	gitAuthorCmd := exec.Command("git", "config", "user.email")
+	out, err := gitAuthorCmd.Output()
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return nil
+	}
+	gitAuthor := string(out)
+	if until != "" {
+		cmd = exec.Command("git", "log", since, until, "--no-merges", "--decorate=full", "--stat",
+			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
+			"--date=format:%Y-%m-%d %H:%M",
+			"--author="+gitAuthor)
+	} else {
+		cmd = exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
+			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
+			"--date=format:%Y-%m-%d %H:%M",
+			"--author="+gitAuthor)
+	}
+
+	return cmd
+}
+
 func main() {
 	createConfigFile()
 	config := readConfig()
@@ -151,29 +175,10 @@ func main() {
 		since = "--since=" + now.Format("2006-01-02")
 	}
 
-	gitAuthorCmd := exec.Command("git", "config", "user.email")
-	out, err := gitAuthorCmd.Output()
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		return
-	}
-	gitAuthor := string(out)
-
 	var message []string
 
-	var cmd *exec.Cmd
 	if len(config.Repos) == 0 {
-		if until != "" {
-			cmd = exec.Command("git", "log", since, until, "--no-merges", "--decorate=full", "--stat",
-				"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-				"--date=format:%Y-%m-%d %H:%M",
-				"--author="+gitAuthor)
-		} else {
-			cmd = exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
-				"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-				"--date=format:%Y-%m-%d %H:%M",
-				"--author="+gitAuthor)
-		}
+		cmd := buildGitCommand(since, until)
 		stdout, err := cmd.Output()
 		if err != nil {
 			fmt.Printf("error: %v\n", err)
@@ -182,17 +187,7 @@ func main() {
 		message = append(message, string(stdout))
 	} else {
 		for _, repo := range config.Repos {
-			if until != "" {
-				cmd = exec.Command("git", "log", since, until, "--no-merges", "--decorate=full", "--stat",
-					"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-					"--date=format:%Y-%m-%d %H:%M",
-					"--author="+gitAuthor)
-			} else {
-				cmd = exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
-					"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-					"--date=format:%Y-%m-%d %H:%M",
-					"--author="+gitAuthor)
-			}
+			cmd := buildGitCommand(since, until)
 			cmd.Dir = repo
 			stdout, err := cmd.Output()
 			if err != nil {
