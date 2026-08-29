@@ -98,7 +98,7 @@ func main() {
 	}
 	gitAuthor := string(out)
 
-	cmd := exec.Command("git", "log", since, "--no-merges", "--decorate=short", "--stat",
+	cmd := exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
 		"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
 		"--date=format:%Y-%m-%d %H:%M",
 		"--author=", gitAuthor)
