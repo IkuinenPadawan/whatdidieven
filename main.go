@@ -72,26 +72,50 @@ type Response struct {
 	} `json:"choices"`
 }
 
-func createConfigFile() *os.File {
+type Config struct {
+	Repos []string `json:"repos"`
+}
+
+func createConfigFile() {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
-		return nil
+		return
 	}
 
 	path := filepath.Join(configDir, "whatdidieven")
+	_, err = os.Stat(path)
+
+	if !os.IsNotExist(err) {
+		return
+	}
+
 	err = os.MkdirAll(path, os.ModePerm)
 	if err != nil {
 		fmt.Printf("error in creating config file path: %v\n", err)
-		return nil
+		return
 	}
 
-	file, err := os.Create(path + "/config.json")
+	_, err = os.Create(path + "/config.json")
 	if err != nil {
 		fmt.Printf("error in creating config file: %v\n", err)
-		return nil
+		return
 	}
+}
 
-	return file
+func readConfig() Config {
+	configDir, err := os.UserConfigDir()
+	var config Config
+	data, err := os.ReadFile(filepath.Join(configDir, "whatdidieven", "config.json"))
+	if err != nil {
+		fmt.Println("error reading config:", err)
+		return Config{}
+	}
+	err = json.Unmarshal(data, &config)
+	if err != nil {
+		fmt.Println("error unmarshaling config:", err)
+		return Config{}
+	}
+	return config
 }
 
 func main() {
