@@ -79,6 +79,9 @@ func main() {
 		switch os.Args[1] {
 		case "today":
 			since = "--since=" + now.Format("2006-01-02")
+		case "yesterday":
+			yesterday := now.AddDate(0, 0, -1)
+			since = "--since=" + yesterday.Format("2006-01-02")
 		case "week":
 			daysBack := (int(now.Weekday()) - 1 + 7) % 7
 			lastMonday := now.AddDate(0, 0, -daysBack)
