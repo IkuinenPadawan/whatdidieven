@@ -123,6 +123,7 @@ func main() {
 	createConfigFile()
 	config := readConfig()
 	var since string
+	var until string
 	now := time.Now()
 
 	if len(os.Args) > 1 {
@@ -132,10 +133,15 @@ func main() {
 		case "yesterday":
 			yesterday := now.AddDate(0, 0, -1)
 			since = "--since=" + yesterday.Format("2006-01-02")
-		case "week":
+		case "this-week":
 			daysBack := (int(now.Weekday()) - 1 + 7) % 7
 			lastMonday := now.AddDate(0, 0, -daysBack)
 			since = "--since=" + lastMonday.Format("2006-01-02")
+		case "last-week":
+			daysBack := (int(now.Weekday()) - 1 + 7) % 7
+			lastWeekMonday := now.AddDate(0, 0, -daysBack-7)
+			since = "--since=" + lastWeekMonday.Format("2006-01-02")
+			until = "--until=" + now.AddDate(0, 0, -daysBack).Format("2006-01-02")
 		default:
 			since = "--since=" + now.Format("2006-01-02")
 		}
@@ -154,10 +160,18 @@ func main() {
 	var message []string
 
 	for _, repo := range config.Repos {
-		cmd := exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
-			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-			"--date=format:%Y-%m-%d %H:%M",
-			"--author="+gitAuthor)
+		var cmd *exec.Cmd
+		if until != "" {
+			cmd = exec.Command("git", "log", since, until, "--no-merges", "--decorate=full", "--stat",
+				"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
+				"--date=format:%Y-%m-%d %H:%M",
+				"--author="+gitAuthor)
+		} else {
+			cmd = exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
+				"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
+				"--date=format:%Y-%m-%d %H:%M",
+				"--author="+gitAuthor)
+		}
 		cmd.Dir = repo
 		stdout, err := cmd.Output()
 		if err != nil {
