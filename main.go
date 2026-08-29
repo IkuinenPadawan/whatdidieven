@@ -90,11 +90,19 @@ func main() {
 		since = "--since=" + now.Format("2006-01-02")
 	}
 
+	gitAuthorCmd := exec.Command("git", "config", "user.email")
+	out, err := gitAuthorCmd.Output()
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
+	gitAuthor := string(out)
+
 	cmd := exec.Command("git", "log", since, "--no-merges", "--decorate=short", "--stat",
 		"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-		"--date=format:%Y-%m-%d %H:%M")
+		"--date=format:%Y-%m-%d %H:%M",
+		"--author=", gitAuthor)
 	stdout, err := cmd.Output()
-
 	if err != nil {
 		fmt.Printf("error: %v\n", err)
 		return
@@ -109,7 +117,7 @@ func main() {
     "messages": [
       {
         "role": "system",
-        "content": %q 
+		"content": %q
       },
       {
         "role": "user",
