@@ -111,10 +111,12 @@ func readConfig() Config {
 		fmt.Println("error reading config:", err)
 		return Config{}
 	}
-	err = json.Unmarshal(data, &config)
-	if err != nil {
-		fmt.Println("error unmarshaling config:", err)
-		return Config{}
+	if len(data) > 0 {
+		err = json.Unmarshal(data, &config)
+		if err != nil {
+			fmt.Println("error unmarshaling config:", err)
+			return Config{}
+		}
 	}
 	return config
 }
@@ -159,8 +161,8 @@ func main() {
 
 	var message []string
 
-	for _, repo := range config.Repos {
-		var cmd *exec.Cmd
+	var cmd *exec.Cmd
+	if len(config.Repos) == 0 {
 		if until != "" {
 			cmd = exec.Command("git", "log", since, until, "--no-merges", "--decorate=full", "--stat",
 				"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
@@ -172,13 +174,33 @@ func main() {
 				"--date=format:%Y-%m-%d %H:%M",
 				"--author="+gitAuthor)
 		}
-		cmd.Dir = repo
 		stdout, err := cmd.Output()
 		if err != nil {
 			fmt.Printf("error: %v\n", err)
 			return
 		}
 		message = append(message, string(stdout))
+	} else {
+		for _, repo := range config.Repos {
+			if until != "" {
+				cmd = exec.Command("git", "log", since, until, "--no-merges", "--decorate=full", "--stat",
+					"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
+					"--date=format:%Y-%m-%d %H:%M",
+					"--author="+gitAuthor)
+			} else {
+				cmd = exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
+					"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
+					"--date=format:%Y-%m-%d %H:%M",
+					"--author="+gitAuthor)
+			}
+			cmd.Dir = repo
+			stdout, err := cmd.Output()
+			if err != nil {
+				fmt.Printf("error: %v\n", err)
+				return
+			}
+			message = append(message, string(stdout))
+		}
 	}
 
 	requestURL := os.Getenv("WHATDIDIEVEN_API_URL")
