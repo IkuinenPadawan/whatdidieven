@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 )
 
@@ -71,7 +72,30 @@ type Response struct {
 	} `json:"choices"`
 }
 
+func createConfigFile() *os.File {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return nil
+	}
+
+	path := filepath.Join(configDir, "whatdidieven")
+	err = os.MkdirAll(path, os.ModePerm)
+	if err != nil {
+		fmt.Printf("error in creating config file path: %v\n", err)
+		return nil
+	}
+
+	file, err := os.Create(path + "/config.json")
+	if err != nil {
+		fmt.Printf("error in creating config file: %v\n", err)
+		return nil
+	}
+
+	return file
+}
+
 func main() {
+	createConfigFile()
 	var since string
 	now := time.Now()
 
