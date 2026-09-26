@@ -155,24 +155,25 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "today":
-			since = "--since=" + now.Format("2006-01-02")
+			since = "--since=" + now.Format("2006-01-02") + " 00:00"
 		case "yesterday":
 			yesterday := now.AddDate(0, 0, -1)
-			since = "--since=" + yesterday.Format("2006-01-02")
+			since = "--since=" + yesterday.Format("2006-01-02") + " 00:00"
+			until = "--until=" + now.Format("2006-01-02") + " 00:00"
 		case "this-week":
 			daysBack := (int(now.Weekday()) - 1 + 7) % 7
 			lastMonday := now.AddDate(0, 0, -daysBack)
-			since = "--since=" + lastMonday.Format("2006-01-02")
+			since = "--since=" + lastMonday.Format("2006-01-02") + " 00:00"
 		case "last-week":
 			daysBack := (int(now.Weekday()) - 1 + 7) % 7
 			lastWeekMonday := now.AddDate(0, 0, -daysBack-7)
-			since = "--since=" + lastWeekMonday.Format("2006-01-02")
-			until = "--until=" + now.AddDate(0, 0, -daysBack).Format("2006-01-02")
+			since = "--since=" + lastWeekMonday.Format("2006-01-02") + " 00:00"
+			until = "--until=" + now.AddDate(0, 0, -daysBack).Format("2006-01-02") + " 00:00"
 		default:
-			since = "--since=" + now.Format("2006-01-02")
+			since = "--since=" + now.Format("2006-01-02") + " 00:00"
 		}
 	} else {
-		since = "--since=" + now.Format("2006-01-02")
+		since = "--since=" + now.Format("2006-01-02") + " 00:00"
 	}
 
 	var message []string
