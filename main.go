@@ -121,9 +121,10 @@ func readConfig() Config {
 	return config
 }
 
-func buildGitCommand(since string, until string) (*exec.Cmd, error) {
+func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error) {
 	var cmd *exec.Cmd
 	gitAuthorCmd := exec.Command("git", "config", "user.email")
+	gitAuthorCmd.Dir = repo
 	out, err := gitAuthorCmd.Output()
 	if err != nil {
 		return nil, err
@@ -140,6 +141,7 @@ func buildGitCommand(since string, until string) (*exec.Cmd, error) {
 			"--date=format:%Y-%m-%d %H:%M",
 			"--author="+gitAuthor)
 	}
+	cmd.Dir = repo
 
 	return cmd, err
 }
@@ -178,7 +180,7 @@ func main() {
 	var message []string
 
 	if len(config.Repos) == 0 {
-		cmd, err := buildGitCommand(since, until)
+		cmd, err := buildGitCommand(since, until, "")
 		if err != nil {
 			fmt.Printf("error: %v\n", err)
 			return
@@ -191,12 +193,11 @@ func main() {
 		message = append(message, string(stdout))
 	} else {
 		for _, repo := range config.Repos {
-			cmd, err := buildGitCommand(since, until)
+			cmd, err := buildGitCommand(since, until, repo)
 			if err != nil {
 				fmt.Printf("error: %v\n", err)
 				return
 			}
-			cmd.Dir = repo
 			stdout, err := cmd.Output()
 			if err != nil {
 				fmt.Printf("error: %v\n", err)
