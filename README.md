@@ -13,7 +13,7 @@ No cloud APIs. No telemetry. No third-party Go dependencies. Your commit history
 # 2. Install
 go install github.com/IkuinenPadawan/whatdidieven@latest
 # 3. Run from inside any git repo
-cd ~/code/my-project && whatdidieven week
+cd ~/code/my-project && whatdidieven this-week
 ```
 
 ## Why
@@ -25,7 +25,7 @@ This tool does it for you. It groups related commits into tasks, pulls out ticke
 ## Example
 
 ```
-$ whatdidieven week
+$ whatdidieven this-week
 
 **2026-04-27 (Monday)**
 - [PROJ-412] Implemented session token rotation — ~2h
@@ -65,20 +65,62 @@ export PATH="$HOME/go/bin:$PATH"
 Run from inside any git repository:
 
 ```sh
-whatdidieven today    # commits from today
-whatdidieven week     # commits since last Monday
+whatdidieven            # defaults to today
+whatdidieven today      # commits from today
+whatdidieven yesterday  # commits from yesterday
+whatdidieven this-week  # commits since last Monday
+whatdidieven last-week  # commits last week
 ```
 
 That's it. Output goes to stdout, so you can pipe it anywhere.
 
 ```sh
-whatdidieven week | glow (https://github.com/charmbracelet/glow)
+whatdidieven this-week | glow (https://github.com/charmbracelet/glow)
 whatdidieven today > timesheet.md
+```
+
+## Configuration
+whatdidieven looks for a config file at:
+
+┌──────────┬─────────────────────────────────────────────────────────────────────────────────────────┐
+│ Platform │                                          Path                                           │
+├──────────┼─────────────────────────────────────────────────────────────────────────────────────────┤
+│ Linux    │ $XDG_CONFIG_HOME/whatdidieven/config.json (default: ~/.config/whatdidieven/config.json) │
+├──────────┼─────────────────────────────────────────────────────────────────────────────────────────┤
+│ macOS    │ ~/Library/Application Support/whatdidieven/config.json                                  │
+├──────────┼─────────────────────────────────────────────────────────────────────────────────────────┤
+│ Windows  │ %AppData%\whatdidieven\config.json                                                      │
+└──────────┴─────────────────────────────────────────────────────────────────────────────────────────┘
+
+The file is optional. If it doesn't exist, the tool creates an empty `config.json` at that path on first run and runs against the current working directory.
+
+#### Multi-repo
+
+To pull commits from multiple repositories in one summary, list their paths:
+
+```json
+  {
+    "repos": [
+      "/home/you/code/backend",
+      "/home/you/code/frontend"
+    ]
+  }
+```
+
+  All repos are queried for the same time window and the combined log is sent to the LLM as a single summary.
+
+### Custom endpoint
+
+Set `WHATDIDIEVEN_API_URL` to point at a server on a different host or port:
+
+```sh
+export WHATDIDIEVEN_API_URL=http://192.168.1.50:11434/v1/chat/completions
+whatdidieven today
 ```
 
 ## How it works
 
-1. Shells out to `git log --no-merges --stat` for the requested window.
+1. Shells out to `git log --no-merges --decorate=full --stat --author=` for the requested window, where the author is read from `git config user.email` (checked per-repo, so a repo-local override is respected). This filters the log to your own commits. `user.email` must be set, or the tool errors out.
 2. Formats each commit with date, hash, subject, and per-file churn.
 3. POSTs the log to `http://localhost:8080/v1/chat/completions` with a system prompt tuned for timesheet generation.
 4. Prints the model's reply.
@@ -98,15 +140,6 @@ llama-server -m model.gguf --port 8080
 ```
 
 The request sends `model: "local-model"` and `temperature: 0.2`. Most local servers ignore the model field and serve whatever you loaded.
-
-### Custom endpoint
-
-Set `WHATDIDIEVEN_API_URL` to point at a server on a different host or port:
-
-```sh
-export WHATDIDIEVEN_API_URL=http://192.168.1.50:11434/v1/chat/completions
-whatdidieven today
-```
 
 ## License
 
