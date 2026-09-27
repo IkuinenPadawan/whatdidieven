@@ -121,15 +121,14 @@ func readConfig() Config {
 	return config
 }
 
-func buildGitCommand(since string, until string) *exec.Cmd {
+func buildGitCommand(since string, until string) (*exec.Cmd, error) {
 	var cmd *exec.Cmd
 	gitAuthorCmd := exec.Command("git", "config", "user.email")
 	out, err := gitAuthorCmd.Output()
 	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		return nil
+		return nil, err
 	}
-	gitAuthor := string(out)
+	gitAuthor := strings.TrimSpace(string(out))
 	if until != "" {
 		cmd = exec.Command("git", "log", since, until, "--no-merges", "--decorate=full", "--stat",
 			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
@@ -142,7 +141,7 @@ func buildGitCommand(since string, until string) *exec.Cmd {
 			"--author="+gitAuthor)
 	}
 
-	return cmd
+	return cmd, err
 }
 
 func main() {
@@ -179,7 +178,11 @@ func main() {
 	var message []string
 
 	if len(config.Repos) == 0 {
-		cmd := buildGitCommand(since, until)
+		cmd, err := buildGitCommand(since, until)
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			return
+		}
 		stdout, err := cmd.Output()
 		if err != nil {
 			fmt.Printf("error: %v\n", err)
@@ -188,7 +191,11 @@ func main() {
 		message = append(message, string(stdout))
 	} else {
 		for _, repo := range config.Repos {
-			cmd := buildGitCommand(since, until)
+			cmd, err := buildGitCommand(since, until)
+			if err != nil {
+				fmt.Printf("error: %v\n", err)
+				return
+			}
 			cmd.Dir = repo
 			stdout, err := cmd.Output()
 			if err != nil {
