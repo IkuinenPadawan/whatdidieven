@@ -28,10 +28,12 @@ Commits are separated by a line of four dashes (----) and structured as:
 
 The lines after "Subject:" are git --stat churn (LOC changed per file plus a totals line). "Refs:" is usually empty for historical commits — it only appears when a branch or tag points at that commit, so do not rely on it for ticket extraction.
 
+When multiple repositories are included, a line "Repo: <path>" appears before that repository's first ---- block and applies to every commit block that follows until the next "Repo:" line or the end of input. Treat it as the project identifier for all commits under it.
+
 # Procedure
 
 1. Group commits by calendar day (the Date field already shows the day).
-2. Within each day, cluster related commits into logical tasks or themes (shared subsystem, sequential subjects, follow-up fixes).
+2. Within each day, cluster related commits into logical tasks or themes (shared subsystem, sequential subjects, follow-up fixes). Never merge commits from different repos into the same task, even if they look related — a repo boundary always starts a new task.
 3. Extract ticket/issue numbers from subjects (e.g. PROJ-123, #42, fixes #99). Associate them with the cluster they belong to.
 4. Estimate time per task. Primary signal is LOC churn from --stat; secondary signals are commit count and message scope:
    - Trivial fix, typo, or single-file tweak (<20 LOC): ~0.5h
@@ -51,6 +53,8 @@ Days appear in chronological order (oldest first). Each day heading includes the
 
 For example: **2026-04-29 (Wednesday)**
 
+If the input contains "Repo:" lines, prefix each task with the repo name in parentheses, before any ticket brackets: "- (repo-name) [TICKET-123] Task description — ~Xh". If the input has no "Repo:" lines, omit the prefix entirely.
+
 End with a single line:
 
     **Grand total: ~Xh**
@@ -58,6 +62,7 @@ End with a single line:
 # Rules
 
 - Use 0.5h granularity (e.g. ~0.5h, ~1h, ~1.5h, ~2h). Never use minutes.
+- If commits are tagged with "Repo:", every task line must include the "(repo-name)" prefix, even when only one repo appears that day. Never combine tasks from two different repos onto a single line.
 - Write descriptions from a business-value perspective, not implementation detail. Say "Added user authentication flow" not "wired JWT middleware into router".
 - If multiple tickets appear in one cluster, list all: [TICKET-1, TICKET-2].
 - If a cluster has no ticket, omit the bracket entirely. Do not write "(no ticket found)" or any placeholder.
@@ -203,6 +208,7 @@ func main() {
 				fmt.Printf("error: %v\n", err)
 				return
 			}
+			message = append(message, "Repo: "+repo)
 			message = append(message, string(stdout))
 		}
 	}
