@@ -246,5 +246,16 @@ func main() {
 		fmt.Printf("error decoding response: %v\n", err)
 		os.Exit(1)
 	}
+
+	if res.StatusCode != 200 {
+		fmt.Println("LLM response error")
+		os.Exit(1)
+	}
+
+	if len(r.Choices) == 0 {
+		fmt.Println("LLM response empty")
+		os.Exit(1)
+	}
+
 	fmt.Println(r.Choices[0].Message.Content)
 }
