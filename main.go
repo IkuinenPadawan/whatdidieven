@@ -122,7 +122,6 @@ func readConfig() Config {
 	var config Config
 	data, err := os.ReadFile(filepath.Join(configDir, "whatdidieven", "config.json"))
 	if err != nil {
-		fmt.Println("error reading config:", err)
 		return Config{}
 	}
 	if len(data) > 0 {
@@ -151,6 +150,10 @@ func addRepoToConfig(config Config) error {
 
 	if repoAlreadyInConfig {
 		return fmt.Errorf("Repo has already been added to config")
+	}
+
+	if config.Repos == nil {
+		fmt.Println("Config file does not exist, creating...")
 	}
 
 	config.Repos = append(config.Repos, wd)
