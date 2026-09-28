@@ -82,6 +82,15 @@ type Config struct {
 	Repos []string `json:"repos"`
 }
 
+func getConfigFilepath() string {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(configDir, "whatdidieven", "config.json")
+
+}
+
 func createConfigFile() {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
@@ -101,7 +110,7 @@ func createConfigFile() {
 		return
 	}
 
-	_, err = os.Create(path + "/config.json")
+	_, err = os.Create(getConfigFilepath())
 	if err != nil {
 		fmt.Printf("error in creating config file: %v\n", err)
 		return
@@ -124,6 +133,39 @@ func readConfig() Config {
 		}
 	}
 	return config
+}
+
+func addRepoToConfig(config Config) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	repoAlreadyInConfig := false
+
+	for _, repoStr := range config.Repos {
+		if repoStr == wd {
+			repoAlreadyInConfig = true
+		}
+	}
+
+	if repoAlreadyInConfig {
+		return fmt.Errorf("Repo has already been added to config")
+	}
+
+	config.Repos = append(config.Repos, wd)
+
+	byteValue, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(getConfigFilepath(), byteValue, 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error) {
@@ -175,6 +217,14 @@ func main() {
 			lastWeekMonday := now.AddDate(0, 0, -daysBack-7)
 			since = "--since=" + lastWeekMonday.Format("2006-01-02") + " 00:00"
 			until = "--until=" + now.AddDate(0, 0, -daysBack).Format("2006-01-02") + " 00:00"
+		case "add":
+			err := addRepoToConfig(config)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			fmt.Println("Repo added to config")
+			os.Exit(1)
 		default:
 			since = "--since=" + now.Format("2006-01-02") + " 00:00"
 		}
