@@ -136,12 +136,12 @@ func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error)
 	}
 	gitAuthor := strings.TrimSpace(string(out))
 	if until != "" {
-		cmd = exec.Command("git", "log", since, until, "--no-merges", "--decorate=full", "--stat",
+		cmd = exec.Command("git", "log", since, until, "--all", "--no-merges", "--decorate=full", "--stat",
 			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
 			"--date=format:%Y-%m-%d %H:%M",
 			"--author="+gitAuthor)
 	} else {
-		cmd = exec.Command("git", "log", since, "--no-merges", "--decorate=full", "--stat",
+		cmd = exec.Command("git", "log", since, "--all", "--no-merges", "--decorate=full", "--stat",
 			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
 			"--date=format:%Y-%m-%d %H:%M",
 			"--author="+gitAuthor)
