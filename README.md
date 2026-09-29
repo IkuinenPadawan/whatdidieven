@@ -27,18 +27,25 @@ This tool does it for you. It groups related commits into tasks, pulls out ticke
 ```
 $ whatdidieven this-week
 
-**2026-04-27 (Monday)**
+**2026-04-27**
 - [PROJ-412] Implemented session token rotation — ~2h
 - Refactored config loader for multi-repo support — ~1.5h
 Total: ~3.5h
 
-**2026-04-29 (Wednesday)**
+**2026-04-29**
 - [PROJ-418, PROJ-420] Added retry logic to payment webhook — ~3h
 - Fixed flaky integration test (?) — ~0.5h
 Total: ~3.5h
 
 **Grand total: ~7h**
 ```
+
+## Future Features
+- Jira integration
+- Better time estimations
+
+## Current limitations
+- Time estimations are aggressively shook from the sleeve of the LLM
 
 ## Install
 
@@ -70,6 +77,7 @@ whatdidieven today      # commits from today
 whatdidieven yesterday  # commits from yesterday
 whatdidieven this-week  # commits since last Monday
 whatdidieven last-week  # commits last week
+whatdidieven add        # adds the current working directory git repo to config
 ```
 
 That's it. Output goes to stdout, so you can pipe it anywhere.
@@ -94,9 +102,14 @@ whatdidieven looks for a config file at:
 
 The file is optional. If it doesn't exist, the tool creates an empty `config.json` at that path on first run and runs against the current working directory.
 
+Add current working directory git repo to the config:
+```sh
+whatdidieven add
+```
+
 #### Multi-repo
 
-To pull commits from multiple repositories in one summary, list their paths:
+To pull commits from multiple repositories in one summary, list their paths (or add them one by one by the add command):
 
 ```json
   {
@@ -131,14 +144,15 @@ The system prompt enforces 0.5h granularity, an 8h daily cap, business-value des
 
 Point any OpenAI-compatible server at port `8080` (or set `WHATDIDIEVEN_API_URL` to override the endpoint). A reasonable starting setup:
 
+For example: https://llama.app/docs/serve
+
 ```sh
-# llama.cpp
-llama-server -m model.gguf --port 8080
+# From a Hugging Face repo (downloaded and cached automatically)
+llama serve -hf ggml-org/gemma-4-e4b-it-GGUF:Q4_0
 
-# LM Studio: enable "Local Server" on port 8080
-# Ollama: OLLAMA_HOST=127.0.0.1:8080 ollama serve  (then /v1 routes work)
+# From a local GGUF file
+llama serve -m my-model.gguf
 ```
-
 The request sends `model: "local-model"` and `temperature: 0.2`. Most local servers ignore the model field and serve whatever you loaded.
 
 ## License
