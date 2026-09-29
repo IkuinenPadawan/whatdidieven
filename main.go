@@ -39,8 +39,9 @@ When multiple repositories are included, a line "Repo: <path>" appears before th
    - Trivial fix, typo, or single-file tweak (<20 LOC): ~1h
    - Small feature or focused change (~20–150 LOC): 2-4h
    - Larger feature, multi-file work, or several related commits (>150 LOC): 3–6h
-5. Cap each day at 8h. If raw estimates exceed 8h, scale them down proportionally.
-6. The day total equals the sum of its task times.
+5. Gaps between commits on the same day indicate work duration.
+6. Cap each day at 8h. If raw estimates exceed 8h, scale them down proportionally.
+7. The day total equals the sum of its task times.
 
 # Output format
 
@@ -80,6 +81,17 @@ type Response struct {
 
 type Config struct {
 	Repos []string `json:"repos"`
+}
+
+func printHelp() {
+	fmt.Println(`
+usage: whatdidieven [-h | --help] [today] [yesterday] [this-week] [add]
+
+today		Get a summary for today
+yesterday	Get a summary for yesterday
+this-week	Get a summary for this week
+last-week	Get a summary for last week
+add		Add current working directory git repo to config`)
 }
 
 func getConfigFilepath() string {
@@ -227,6 +239,9 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Println("Repo added to config")
+			os.Exit(1)
+		case "--help", "-h":
+			printHelp()
 			os.Exit(1)
 		default:
 			since = "--since=" + now.Format("2006-01-02") + " 00:00"
