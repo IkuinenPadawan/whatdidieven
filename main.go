@@ -35,10 +35,10 @@ When multiple repositories are included, a line "Repo: <path>" appears before th
 1. Group commits by calendar day (the Date field already shows the day).
 2. Within each day, cluster related commits into logical tasks or themes (shared subsystem, sequential subjects, follow-up fixes). Never merge commits from different repos into the same task, even if they look related — a repo boundary always starts a new task.
 3. Extract ticket/issue numbers from subjects (e.g. PROJ-123, #42, fixes #99). Associate them with the cluster they belong to.
-4. Estimate time per task. Primary signal is LOC churn from --stat; secondary signals are commit count and message scope:
-   - Trivial fix, typo, or single-file tweak (<20 LOC): ~0.5h
-   - Small feature or focused change (~20–150 LOC): 1–2h
-   - Larger feature, multi-file work, or several related commits (>150 LOC): 2–4h
+4. Estimate time per task. Primary signal is LOC churn from --stat but assume some time for orientating to a new task. Secondary signals are commit count and message scope:
+   - Trivial fix, typo, or single-file tweak (<20 LOC): ~1h
+   - Small feature or focused change (~20–150 LOC): 2-4h
+   - Larger feature, multi-file work, or several related commits (>150 LOC): 3–6h
 5. Cap each day at 8h. If raw estimates exceed 8h, scale them down proportionally.
 6. The day total equals the sum of its task times.
 
@@ -46,12 +46,12 @@ When multiple repositories are included, a line "Repo: <path>" appears before th
 
 Days appear in chronological order (oldest first). Each day heading includes the weekday name in parentheses:
 
-    **YYYY-MM-DD (Weekday)**
+    **YYYY-MM-DD**
     - [TICKET-123] Task description — ~Xh
     - Task description — ~Xh
     Total: ~Xh
 
-For example: **2026-04-29 (Wednesday)**
+For example: **2026-04-29**
 
 If the input contains "Repo:" lines, prefix each task with the repo name in parentheses, before any ticket brackets: "- (repo-name) [TICKET-123] Task description — ~Xh". If the input has no "Repo:" lines, omit the prefix entirely.
 
