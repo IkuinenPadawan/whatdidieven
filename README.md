@@ -131,6 +131,22 @@ export WHATDIDIEVEN_API_URL=http://192.168.1.50:11434/v1/chat/completions
 whatdidieven today
 ```
 
+For endpoints that require authentication, set `WHATDIDIEVEN_API_KEY`. The key is sent as a Bearer token in the `Authorization` header:
+
+```sh
+export WHATDIDIEVEN_API_KEY=your-api-key
+whatdidieven today
+```
+
+To choose the model sent in the API request, set `WHATDIDIEVEN_MODEL`:
+
+```sh
+export WHATDIDIEVEN_MODEL='your-model-name'
+whatdidieven today
+```
+
+If unset, the request uses `local-model`.
+
 ## How it works
 
 1. Shells out to `git log --no-merges --decorate=full --stat --author=` for the requested window, where the author is read from `git config user.email` (checked per-repo, so a repo-local override is respected). This filters the log to your own commits. `user.email` must be set, or the tool errors out.
@@ -153,7 +169,7 @@ llama serve -hf ggml-org/gemma-4-e4b-it-GGUF:Q4_0
 # From a local GGUF file
 llama serve -m my-model.gguf
 ```
-The request sends `model: "local-model"` and `temperature: 0.2`. Most local servers ignore the model field and serve whatever you loaded.
+The request sends the model from `WHATDIDIEVEN_MODEL` (default: `local-model`) and `temperature: 0.2`. Most local servers ignore the model field and serve whatever you loaded.
 
 ## License
 

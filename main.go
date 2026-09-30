@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -285,8 +286,12 @@ func main() {
 	if requestURL == "" {
 		requestURL = "http://localhost:8080/v1/chat/completions"
 	}
+	model := os.Getenv("WHATDIDIEVEN_MODEL")
+	if model == "" {
+		model = "local-model"
+	}
 	jsonStr := []byte(fmt.Sprintf(`{
-    "model": "local-model",
+    "model": %q,
     "messages": [
       {
         "role": "system",
@@ -298,7 +303,7 @@ func main() {
       }
     ],
     "temperature": 0.2
-  }`, systemPrompt, strings.Join(message, "\n")))
+  }`, model, systemPrompt, strings.Join(message, "\n")))
 
 	req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
 	if err != nil {
@@ -306,6 +311,9 @@ func main() {
 		os.Exit(1)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -315,14 +323,20 @@ func main() {
 
 	defer res.Body.Close()
 
-	var r Response
-	if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
-		fmt.Printf("error decoding response: %v\n", err)
+	responseBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		fmt.Printf("error reading LLM response: %v\n", err)
 		os.Exit(1)
 	}
 
-	if res.StatusCode != 200 {
-		fmt.Println("LLM response error")
+	if res.StatusCode != http.StatusOK {
+		fmt.Printf("LLM response error (%s): %s\n", res.Status, strings.TrimSpace(string(responseBody)))
+		os.Exit(1)
+	}
+
+	var r Response
+	if err := json.Unmarshal(responseBody, &r); err != nil {
+		fmt.Printf("error decoding response: %v\n", err)
 		os.Exit(1)
 	}
 
