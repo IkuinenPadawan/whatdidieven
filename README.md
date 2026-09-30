@@ -8,11 +8,15 @@ No cloud APIs. No telemetry. No third-party Go dependencies. Your commit history
 
 ## Quick start
 
+Ensure Go is installed.
+
 ```sh
 # 1. Start a local LLM server on :8080 (see "LLM server" below)
 # 2. Install
 go install github.com/IkuinenPadawan/whatdidieven@latest
-# 3. Run from inside any git repo
+# 3. Add binary to path
+export PATH="$HOME/go/bin:$PATH"
+# 4. Run from inside any git repo
 cd ~/code/my-project && whatdidieven this-week
 ```
 
@@ -43,9 +47,11 @@ Total: ~3.5h
 ## Future Features
 - Jira integration
 - Better time estimations
+- Computer active time calculation
+- Including stats of work done by AI agents
 
 ## Current limitations
-- Time estimations are aggressively shook from the sleeve of the LLM
+- Time estimations are aggressively shook from the sleeve of the LLM and are quite off many times
 
 ## Install
 
