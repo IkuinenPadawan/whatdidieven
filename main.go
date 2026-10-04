@@ -184,8 +184,56 @@ func addRepoToConfig(config Config) error {
 	return nil
 }
 
+type Commit struct {
+	Hash          string
+	AuthorDate    time.Time
+	CommitterDate time.Time
+	Email         string
+	Subject       string
+	Body          string
+	Decoration    string
+	Ref           string
+}
+
+func parseCommits(data []byte) ([]Commit, error) {
+	var commits []Commit
+	parts := bytes.Split(data, []byte("\x1e"))
+
+	for i, part := range parts {
+		commit := Commit{}
+		part = bytes.TrimSpace(part)
+		if len(part) > 0 {
+			header, _, found := bytes.Cut(part, []byte("\x1d"))
+			if found == false {
+				fmt.Errorf("record %d: missing header end", i)
+			}
+			fields := bytes.Split(header, []byte("\x1f"))
+			if len(fields) == 8 {
+				commit.Hash = string(fields[0])
+				authorT, err := time.Parse(time.RFC3339, string(fields[1]))
+				if err != nil {
+					fmt.Errorf("record %d: author date: %w", i, err)
+				}
+				commit.AuthorDate = authorT.Local()
+				committerT, err := time.Parse(time.RFC3339, string(fields[2]))
+				if err != nil {
+					fmt.Errorf("record %d: committer date: %w", i, err)
+				}
+				commit.CommitterDate = committerT.Local()
+				commit.Email = strings.TrimSpace(string(fields[3]))
+				commit.Ref = (string(fields[4]))
+				commit.Decoration = (string(fields[5]))
+				commit.Subject = strings.TrimSpace(string(fields[6]))
+				commit.Body = strings.TrimSpace(string(fields[7]))
+
+				commits = append(commits, commit)
+			}
+		}
+	}
+	return commits, nil
+}
+
 func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error) {
-	var cmd *exec.Cmd
 	gitAuthorCmd := exec.Command("git", "config", "user.email")
 	gitAuthorCmd.Dir = repo
 	out, err := gitAuthorCmd.Output()
@@ -193,20 +241,21 @@ func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error)
 		return nil, err
 	}
 	gitAuthor := strings.TrimSpace(string(out))
+
+	args := []string{"log", "--branches", "--remotes", "--no-merges", "--author-date-order",
+		"--author=" + gitAuthor, "--fixed-strings", "--regexp-ignore-case", since}
 	if until != "" {
-		cmd = exec.Command("git", "log", since, until, "--all", "--no-merges", "--decorate=full", "--stat",
-			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-			"--date=format:%Y-%m-%d %H:%M",
-			"--author="+gitAuthor)
-	} else {
-		cmd = exec.Command("git", "log", since, "--all", "--no-merges", "--decorate=full", "--stat",
-			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-			"--date=format:%Y-%m-%d %H:%M",
-			"--author="+gitAuthor)
+		args = append(args, until)
 	}
+	// Records: \x1e starts a record, fields split on \x1f, \x1d ends the header, numstat follows.
+	// Fields: hash, author date, committer date, author email, source ref, decorations, subject, body.
+	args = append(args, "-w", "--numstat", "--source",
+		"--pretty=format:%x1e%H%x1f%aI%x1f%cI%x1f%ae%x1f%S%x1f%D%x1f%s%x1f%b%x1d")
+
+	cmd := exec.Command("git", args...)
 	cmd.Dir = repo
 
-	return cmd, err
+	return cmd, nil
 }
 
 func main() {
