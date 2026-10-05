@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -14,6 +15,31 @@ const sampleLog = "\x1e508d9a2cf44b168f005e606e45bac1845c74bbf2\x1f2026-09-29T19
 	"\x1efc75c9e253a7ebf35f568b07472db97530eb338c\x1f2026-09-29T18:48:04+03:00\x1f2026-09-29T19:00:33+03:00\x1fsome.email@somemail.com\x1fdevel\x1f\x1ffeat: add simple help printout\x1fFirst line of body\nSecond line of body\n\x1d\n" +
 	"17\t2\tmain.go\n" +
 	"-\t-\tlogo.png\n"
+
+func TestParseFileStats(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    []FileStat
+		wantErr bool
+	}{
+		{"empty", "", nil, false},
+		{"text file", "17\t2\tmain.go\n", []FileStat{{Added: 17, Deleted: 2, Path: "main.go"}}, false},
+		{"binary file", "-\t-\tlogo.png\n", []FileStat{{Path: "logo.png", Binary: true}}, false},
+		{"path with spaces", "1\t1\tmy file.go\n", []FileStat{{Added: 1, Deleted: 1, Path: "my file.go"}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseFileStats([]byte(tt.input))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestParseCommits(t *testing.T) {
 	commits, err := parseCommits([]byte(sampleLog))
@@ -55,6 +81,12 @@ func TestParseCommits(t *testing.T) {
 	}
 	if c.Decoration != "" {
 		t.Errorf("Decoration = %q", c.Decoration)
+	}
+	if len(commits[0].Files) != 1 || commits[0].Files[0].Path != "README.md" {
+		t.Errorf("commits[0].Files = %+v", commits[0].Files)
+	}
+	if len(c.Files) != 2 || !c.Files[1].Binary {
+		t.Errorf("Files = %+v", c.Files)
 	}
 
 }
