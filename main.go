@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -184,6 +185,13 @@ func addRepoToConfig(config Config) error {
 	return nil
 }
 
+type FileStat struct {
+	Added   int
+	Deleted int
+	Path    string
+	Binary  bool
+}
+
 type Commit struct {
 	Hash          string
 	AuthorDate    time.Time
@@ -193,6 +201,40 @@ type Commit struct {
 	Body          string
 	Decoration    string
 	Ref           string
+	Files         []FileStat
+}
+
+func parseFileStats(data []byte) ([]FileStat, error) {
+	var filestats []FileStat
+
+	fileStatLines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+	for _, line := range fileStatLines {
+		if len(line) > 0 {
+			cols := bytes.SplitN(line, []byte("\t"), 3)
+			if len(cols) == 3 {
+				var added, deleted int
+				var err error
+
+				binary := string(cols[0]) == "-" && string(cols[1]) == "-"
+
+				if !binary {
+					added, err = strconv.Atoi(string(cols[0]))
+					if err != nil {
+						fmt.Println("Error in num conv")
+					}
+					deleted, err = strconv.Atoi(string(cols[1]))
+					if err != nil {
+						fmt.Println("Error in num conv")
+					}
+				}
+				path := string(cols[2])
+				filestats = append(filestats, FileStat{Added: added, Deleted: deleted, Path: path, Binary: binary})
+			}
+		}
+	}
+
+	return filestats, nil
+
 }
 
 func parseCommits(data []byte) ([]Commit, error) {
@@ -203,7 +245,12 @@ func parseCommits(data []byte) ([]Commit, error) {
 		commit := Commit{}
 		part = bytes.TrimSpace(part)
 		if len(part) > 0 {
-			header, _, found := bytes.Cut(part, []byte("\x1d"))
+			header, filestat, found := bytes.Cut(part, []byte("\x1d"))
+			filestats, err := parseFileStats(filestat)
+			if err != nil {
+				fmt.Println("Filestat error")
+			}
+			commit.Files = filestats
 			if found == false {
 				fmt.Errorf("record %d: missing header end", i)
 			}
