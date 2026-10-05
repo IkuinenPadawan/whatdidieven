@@ -208,33 +208,34 @@ func parseFileStats(data []byte) ([]FileStat, error) {
 	var filestats []FileStat
 
 	fileStatLines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
-	for _, line := range fileStatLines {
-		if len(line) > 0 {
-			cols := bytes.SplitN(line, []byte("\t"), 3)
-			if len(cols) == 3 {
-				var added, deleted int
-				var err error
+	for i, line := range fileStatLines {
+		if len(line) == 0 {
+			continue
+		}
+		cols := bytes.SplitN(line, []byte("\t"), 3)
+		if len(cols) != 3 {
+			return nil, fmt.Errorf("filestat line %d: expected 3 columns, got %d", i+1, len(cols))
+		}
+		var added, deleted int
 
-				binary := string(cols[0]) == "-" && string(cols[1]) == "-"
+		binary := string(cols[0]) == "-" && string(cols[1]) == "-"
 
-				if !binary {
-					added, err = strconv.Atoi(string(cols[0]))
-					if err != nil {
-						fmt.Println("Error in num conv")
-					}
-					deleted, err = strconv.Atoi(string(cols[1]))
-					if err != nil {
-						fmt.Println("Error in num conv")
-					}
-				}
-				path := string(cols[2])
-				filestats = append(filestats, FileStat{Added: added, Deleted: deleted, Path: path, Binary: binary})
+		if !binary {
+			var err error
+			added, err = strconv.Atoi(string(cols[0]))
+			if err != nil {
+				return nil, fmt.Errorf("filestat line %d: parse added count %q: %w", i+1, cols[0], err)
+			}
+			deleted, err = strconv.Atoi(string(cols[1]))
+			if err != nil {
+				return nil, fmt.Errorf("filestat line %d: parse deleted count %q: %w", i+1, cols[1], err)
+
 			}
 		}
+		path := string(cols[2])
+		filestats = append(filestats, FileStat{Added: added, Deleted: deleted, Path: path, Binary: binary})
 	}
-
 	return filestats, nil
-
 }
 
 func parseCommits(data []byte) ([]Commit, error) {
@@ -244,38 +245,40 @@ func parseCommits(data []byte) ([]Commit, error) {
 	for i, part := range parts {
 		commit := Commit{}
 		part = bytes.TrimSpace(part)
-		if len(part) > 0 {
-			header, filestat, found := bytes.Cut(part, []byte("\x1d"))
-			filestats, err := parseFileStats(filestat)
-			if err != nil {
-				fmt.Println("Filestat error")
-			}
-			commit.Files = filestats
-			if found == false {
-				fmt.Errorf("record %d: missing header end", i)
-			}
-			fields := bytes.Split(header, []byte("\x1f"))
-			if len(fields) == 8 {
-				commit.Hash = string(fields[0])
-				authorT, err := time.Parse(time.RFC3339, string(fields[1]))
-				if err != nil {
-					fmt.Errorf("record %d: author date: %w", i, err)
-				}
-				commit.AuthorDate = authorT.Local()
-				committerT, err := time.Parse(time.RFC3339, string(fields[2]))
-				if err != nil {
-					fmt.Errorf("record %d: committer date: %w", i, err)
-				}
-				commit.CommitterDate = committerT.Local()
-				commit.Email = strings.TrimSpace(string(fields[3]))
-				commit.Ref = (string(fields[4]))
-				commit.Decoration = (string(fields[5]))
-				commit.Subject = strings.TrimSpace(string(fields[6]))
-				commit.Body = strings.TrimSpace(string(fields[7]))
-
-				commits = append(commits, commit)
-			}
+		if len(part) == 0 {
+			continue
 		}
+		header, filestat, found := bytes.Cut(part, []byte("\x1d"))
+		if !found {
+			return nil, fmt.Errorf("record %d: missing header end", i)
+		}
+		filestats, err := parseFileStats(filestat)
+		if err != nil {
+			return nil, fmt.Errorf("record %d: parse filestats: %w", i, err)
+		}
+		commit.Files = filestats
+		fields := bytes.Split(header, []byte("\x1f"))
+		if len(fields) != 8 {
+			return nil, fmt.Errorf("record %d: expected 8 header fields, got %d", i, len(fields))
+		}
+		commit.Hash = string(fields[0])
+		authorT, err := time.Parse(time.RFC3339, string(fields[1]))
+		if err != nil {
+			return nil, fmt.Errorf("record %d: author date: %w", i, err)
+		}
+		commit.AuthorDate = authorT.Local()
+		committerT, err := time.Parse(time.RFC3339, string(fields[2]))
+		if err != nil {
+			return nil, fmt.Errorf("record %d: committer date: %w", i, err)
+		}
+		commit.CommitterDate = committerT.Local()
+		commit.Email = strings.TrimSpace(string(fields[3]))
+		commit.Ref = string(fields[4])
+		commit.Decoration = string(fields[5])
+		commit.Subject = strings.TrimSpace(string(fields[6]))
+		commit.Body = strings.TrimSpace(string(fields[7]))
+
+		commits = append(commits, commit)
 	}
 	return commits, nil
 }
