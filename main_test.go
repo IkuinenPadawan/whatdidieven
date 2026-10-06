@@ -16,6 +16,34 @@ const sampleLog = "\x1e508d9a2cf44b168f005e606e45bac1845c74bbf2\x1f2026-09-29T19
 	"17\t2\tmain.go\n" +
 	"-\t-\tlogo.png\n"
 
+func TestFilterCommitsByDate(t *testing.T) {
+	at := func(h, m int, day int) time.Time {
+		return time.Date(2026, 10, day, h, m, 0, 0, time.UTC)
+	}
+	commits := []Commit{
+		{Subject: "before window", AuthorDate: at(23, 59, 4)},
+		{Subject: "exactly start", AuthorDate: at(0, 0, 5)},
+		{Subject: "inside", AuthorDate: at(12, 30, 5)},
+		{Subject: "just before end", AuthorDate: at(23, 59, 5)},
+		{Subject: "exactly end", AuthorDate: at(0, 0, 6)},
+	}
+
+	got := filterCommitsByDate(commits, Window{
+		Start: time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC),
+		End:   time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC),
+	})
+
+	want := []string{"exactly start", "inside", "just before end"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d commits, want %d", len(got), len(want))
+	}
+	for i, c := range got {
+		if c.Subject != want[i] {
+			t.Errorf("commit %d: got %q, want %q", i, c.Subject, want[i])
+		}
+	}
+}
+
 func TestParseFileStats(t *testing.T) {
 	tests := []struct {
 		name    string
