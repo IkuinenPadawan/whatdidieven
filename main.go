@@ -315,6 +315,16 @@ func buildGitCommand(w Window, repo string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
+func filterCommitsByDate(commits []Commit, w Window) []Commit {
+	var keep []Commit
+	for _, c := range commits {
+		if !c.AuthorDate.Before(w.Start) && c.AuthorDate.Before(w.End) {
+			keep = append(keep, c)
+		}
+	}
+	return keep
+}
+
 func fetchCommits(repo string, w Window) ([]Commit, error) {
 	cmd, err := buildGitCommand(w, repo)
 	if err != nil {
@@ -327,7 +337,8 @@ func fetchCommits(repo string, w Window) ([]Commit, error) {
 		return nil, err
 	}
 	commits, _ := parseCommits(stdout)
-	return commits, nil
+	keep := filterCommitsByDate(commits, w)
+	return keep, nil
 }
 
 func main() {
