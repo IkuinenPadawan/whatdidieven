@@ -85,6 +85,14 @@ type Config struct {
 	Repos []string `json:"repos"`
 }
 
+type Window struct {
+	Start, End time.Time
+}
+
+func startOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
 func printHelp() {
 	fmt.Println(`
 usage: whatdidieven [-h | --help] [today] [yesterday] [this-week] [add]
@@ -283,7 +291,7 @@ func parseCommits(data []byte) ([]Commit, error) {
 	return commits, nil
 }
 
-func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error) {
+func buildGitCommand(w Window, repo string) (*exec.Cmd, error) {
 	gitAuthorCmd := exec.Command("git", "config", "user.email")
 	gitAuthorCmd.Dir = repo
 	out, err := gitAuthorCmd.Output()
@@ -291,12 +299,11 @@ func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error)
 		return nil, err
 	}
 	gitAuthor := strings.TrimSpace(string(out))
+	since := "--since=" + w.Start.AddDate(0, 0, -2).Format(time.RFC3339)
+	until := "--until=" + w.End.AddDate(0, 0, 1).Format(time.RFC3339)
 
 	args := []string{"log", "--branches", "--remotes", "--no-merges", "--author-date-order",
-		"--author=" + gitAuthor, "--fixed-strings", "--regexp-ignore-case", since}
-	if until != "" {
-		args = append(args, until)
-	}
+		"--author=" + gitAuthor, "--fixed-strings", "--regexp-ignore-case", since, until}
 	// Records: \x1e starts a record, fields split on \x1f, \x1d ends the header, numstat follows.
 	// Fields: hash, author date, committer date, author email, source ref, decorations, subject, body.
 	args = append(args, "-w", "--numstat", "--source",
@@ -308,30 +315,41 @@ func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error)
 	return cmd, nil
 }
 
+func fetchCommits(repo string, w Window) ([]Commit, error) {
+	cmd, err := buildGitCommand(w, repo)
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return nil, err
+	}
+	stdout, err := cmd.Output()
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return nil, err
+	}
+	commits, _ := parseCommits(stdout)
+	return commits, nil
+}
+
 func main() {
 	createConfigFile()
 	config := readConfig()
-	var since string
-	var until string
+	var w Window
 	now := time.Now()
+	today := startOfDay(now)
+	daysBack := (int(now.Weekday()) - 1 + 7) % 7
+	monday := today.AddDate(0, 0, -daysBack)
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "today":
-			since = "--since=" + now.Format("2006-01-02") + " 00:00"
+			w = Window{today, today.AddDate(0, 0, 1)}
 		case "yesterday":
-			yesterday := now.AddDate(0, 0, -1)
-			since = "--since=" + yesterday.Format("2006-01-02") + " 00:00"
-			until = "--until=" + now.Format("2006-01-02") + " 00:00"
+			w = Window{today.AddDate(0, 0, -1), today}
 		case "this-week":
-			daysBack := (int(now.Weekday()) - 1 + 7) % 7
-			lastMonday := now.AddDate(0, 0, -daysBack)
-			since = "--since=" + lastMonday.Format("2006-01-02") + " 00:00"
+			w = Window{monday, today.AddDate(0, 0, 1)}
 		case "last-week":
-			daysBack := (int(now.Weekday()) - 1 + 7) % 7
-			lastWeekMonday := now.AddDate(0, 0, -daysBack-7)
-			since = "--since=" + lastWeekMonday.Format("2006-01-02") + " 00:00"
-			until = "--until=" + now.AddDate(0, 0, -daysBack).Format("2006-01-02") + " 00:00"
+			w = Window{monday.AddDate(0, 0, -7), monday}
+
 		case "add":
 			err := addRepoToConfig(config)
 			if err != nil {
@@ -344,40 +362,24 @@ func main() {
 			printHelp()
 			os.Exit(1)
 		default:
-			since = "--since=" + now.Format("2006-01-02") + " 00:00"
+			w = Window{today, today.AddDate(0, 0, 1)}
 		}
 	} else {
-		since = "--since=" + now.Format("2006-01-02") + " 00:00"
+		w = Window{today, today.AddDate(0, 0, 1)}
+
 	}
 
 	var message []string
 
 	if len(config.Repos) == 0 {
-		cmd, err := buildGitCommand(since, until, "")
-		if err != nil {
-			fmt.Printf("error: %v\n", err)
-			return
-		}
-		stdout, err := cmd.Output()
-		if err != nil {
-			fmt.Printf("error: %v\n", err)
-			return
-		}
-		message = append(message, string(stdout))
+		commits, _ := fetchCommits("", w)
+		message = append(message, string(commits))
 	} else {
 		for _, repo := range config.Repos {
-			cmd, err := buildGitCommand(since, until, repo)
-			if err != nil {
-				fmt.Printf("error: %v\n", err)
-				return
-			}
-			stdout, err := cmd.Output()
-			if err != nil {
-				fmt.Printf("error: %v\n", err)
-				return
-			}
+			commits, _ := fetchCommits(repo, w)
+
 			message = append(message, "Repo: "+repo)
-			message = append(message, string(stdout))
+			message = append(message, string(commits))
 		}
 	}
 
