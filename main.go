@@ -201,6 +201,7 @@ type FileStat struct {
 }
 
 type Commit struct {
+	Repo          string
 	Hash          string
 	AuthorDate    time.Time
 	CommitterDate time.Time
@@ -246,7 +247,7 @@ func parseFileStats(data []byte) ([]FileStat, error) {
 	return filestats, nil
 }
 
-func parseCommits(data []byte) ([]Commit, error) {
+func parseCommits(data []byte, repo string) ([]Commit, error) {
 	var commits []Commit
 	parts := bytes.Split(data, []byte("\x1e"))
 
@@ -285,6 +286,7 @@ func parseCommits(data []byte) ([]Commit, error) {
 		commit.Decoration = string(fields[5])
 		commit.Subject = strings.TrimSpace(string(fields[6]))
 		commit.Body = strings.TrimSpace(string(fields[7]))
+		commit.Repo = strings.TrimSpace(filepath.Base(repo))
 
 		commits = append(commits, commit)
 	}
@@ -336,7 +338,7 @@ func fetchCommits(repo string, w Window) ([]Commit, error) {
 		fmt.Printf("error: %v\n", err)
 		return nil, err
 	}
-	commits, _ := parseCommits(stdout)
+	commits, _ := parseCommits(stdout, repo)
 	keep := filterCommitsByDate(commits, w)
 	return keep, nil
 }
@@ -384,11 +386,20 @@ func main() {
 
 	if len(config.Repos) == 0 {
 		commits, _ := fetchCommits("", w)
+		//		for _, p := range commits {
+		//			fmt.Printf("%+v\n", p)
+		//		}
+		//
+		//		os.Exit(1)
 		message = append(message, string(commits))
 	} else {
 		for _, repo := range config.Repos {
 			commits, _ := fetchCommits(repo, w)
-
+			//			for _, p := range commits {
+			//				fmt.Printf("%+v\n", p)
+			//			}
+			//
+			//			os.Exit(1)
 			message = append(message, "Repo: "+repo)
 			message = append(message, string(commits))
 		}
