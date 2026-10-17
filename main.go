@@ -385,7 +385,12 @@ func main() {
 	var message []string
 
 	if len(config.Repos) == 0 {
-		commits, err := fetchCommits("", w)
+		wd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		commits, err := fetchCommits(wd, w)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
