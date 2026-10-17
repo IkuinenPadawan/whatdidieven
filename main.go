@@ -330,17 +330,17 @@ func filterCommitsByDate(commits []Commit, w Window) []Commit {
 func fetchCommits(repo string, w Window) ([]Commit, error) {
 	cmd, err := buildGitCommand(w, repo)
 	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		return nil, err
+		return nil, fmt.Errorf("%s: build git command: %w", repo, err)
 	}
 	stdout, err := cmd.Output()
 	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		return nil, err
+		return nil, fmt.Errorf("%s: git log: %w", repo, err)
 	}
-	commits, _ := parseCommits(stdout, repo)
-	keep := filterCommitsByDate(commits, w)
-	return keep, nil
+	commits, err := parseCommits(stdout, repo)
+	if err != nil {
+		return nil, fmt.Errorf("%s: parse commits: %w", repo, err)
+	}
+	return filterCommitsByDate(commits, w), nil
 }
 
 func main() {
@@ -385,7 +385,11 @@ func main() {
 	var message []string
 
 	if len(config.Repos) == 0 {
-		commits, _ := fetchCommits("", w)
+		commits, err := fetchCommits("", w)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
 		//		for _, p := range commits {
 		//			fmt.Printf("%+v\n", p)
 		//		}
@@ -394,7 +398,11 @@ func main() {
 		message = append(message, string(commits))
 	} else {
 		for _, repo := range config.Repos {
-			commits, _ := fetchCommits(repo, w)
+			commits, err := fetchCommits(repo, w)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
+				continue
+			}
 			//			for _, p := range commits {
 			//				fmt.Printf("%+v\n", p)
 			//			}
