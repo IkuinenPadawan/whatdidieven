@@ -70,7 +70,7 @@ func TestParseFileStats(t *testing.T) {
 }
 
 func TestParseCommits(t *testing.T) {
-	commits, err := parseCommits([]byte(sampleLog))
+	commits, err := parseCommits([]byte(sampleLog), "/some/path/myrepo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,6 +81,9 @@ func TestParseCommits(t *testing.T) {
 	c := commits[1]
 	if c.Hash != "fc75c9e253a7ebf35f568b07472db97530eb338c" {
 		t.Errorf("Hash = %q", c.Hash)
+	}
+	if c.Repo != "myrepo" {
+		t.Errorf("Repo = %q", c.Repo)
 	}
 	if c.Subject != "feat: add simple help printout" {
 		t.Errorf("Subject = %q", c.Subject)
@@ -120,7 +123,7 @@ func TestParseCommits(t *testing.T) {
 }
 
 func TestParseCommitsEmpty(t *testing.T) {
-	commits, err := parseCommits(nil)
+	commits, err := parseCommits(nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
