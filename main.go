@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -213,6 +214,11 @@ type Commit struct {
 	Files         []FileStat
 }
 
+type RepoBucket struct {
+	Repo    string
+	Commits []Commit
+}
+
 func parseFileStats(data []byte) ([]FileStat, error) {
 	var filestats []FileStat
 
@@ -327,6 +333,46 @@ func filterCommitsByDate(commits []Commit, w Window) []Commit {
 	return keep
 }
 
+func summarizeDay(commits []Commit, date time.Time) string {
+	sortedByDate := slices.Clone(commits)
+	slices.SortStableFunc(sortedByDate, func(a, b Commit) int {
+		return a.AuthorDate.Compare(b.AuthorDate)
+	})
+
+	var repoBuckets []RepoBucket
+	for _, c := range sortedByDate {
+		found := -1
+		for i := range repoBuckets {
+			if repoBuckets[i].Repo == c.Repo {
+				found = i
+				break
+			}
+		}
+		if found == -1 {
+			repoBuckets = append(repoBuckets, RepoBucket{Repo: c.Repo})
+			found = len(repoBuckets) - 1
+		}
+		repoBuckets[found].Commits = append(repoBuckets[found].Commits, c)
+
+	}
+
+	var b strings.Builder
+	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + "\n")
+	for _, r := range repoBuckets {
+		b.WriteString("  " + "REPO " + r.Repo + "\n")
+		for i, c := range r.Commits {
+			b.WriteString("      " + c.AuthorDate.Local().Format("15:04") + " " + c.Subject)
+			if i != len(r.Commits) {
+				b.WriteString("\n")
+
+			}
+		}
+	}
+
+	return b.String()
+
+}
+
 func fetchCommits(repo string, w Window) ([]Commit, error) {
 	cmd, err := buildGitCommand(w, repo)
 	if err != nil {
@@ -383,6 +429,7 @@ func main() {
 	}
 
 	var message []string
+	var allCommits []Commit
 
 	if len(config.Repos) == 0 {
 		wd, err := os.Getwd()
@@ -390,7 +437,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
-		commits, err := fetchCommits(wd, w)
+		allCommits, err = fetchCommits(wd, w)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
@@ -400,7 +447,9 @@ func main() {
 		//		}
 		//
 		//		os.Exit(1)
-		message = append(message, string(commits))
+		summarizeDay(allCommits, today)
+		return
+		//		message = append(message, string(commits))
 	} else {
 		for _, repo := range config.Repos {
 			commits, err := fetchCommits(repo, w)
@@ -408,15 +457,15 @@ func main() {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 				continue
 			}
-			//			for _, p := range commits {
-			//				fmt.Printf("%+v\n", p)
-			//			}
-			//
-			//			os.Exit(1)
-			message = append(message, "Repo: "+repo)
-			message = append(message, string(commits))
+			allCommits = append(allCommits, commits...)
 		}
 	}
+
+	for d := w.Start; d.Before(w.End); d = d.AddDate(0, 0, 1) {
+		commitsOnDate := filterCommitsByDate(allCommits, Window{d, d.AddDate(0, 0, 1)})
+		summarizeDay(commitsOnDate, d)
+	}
+	os.Exit(1)
 
 	requestURL := os.Getenv("WHATDIDIEVEN_API_URL")
 	if requestURL == "" {
