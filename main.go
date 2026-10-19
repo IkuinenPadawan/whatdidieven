@@ -333,6 +333,18 @@ func filterCommitsByDate(commits []Commit, w Window) []Commit {
 	return keep
 }
 
+func getDayTotalTime(commits []Commit) string {
+	earliest := commits[0].AuthorDate
+	latest := commits[len(commits)-1].AuthorDate
+
+	d := latest.Sub(earliest)
+
+	h := int(d.Hours())
+	m := int(d.Minutes()+30) % 60
+
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
 func summarizeDay(commits []Commit, date time.Time) string {
 	sortedByDate := slices.Clone(commits)
 	slices.SortStableFunc(sortedByDate, func(a, b Commit) int {
@@ -357,7 +369,7 @@ func summarizeDay(commits []Commit, date time.Time) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + "\n")
+	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + getDayTotalTime(sortedByDate) + "\n")
 	for _, r := range repoBuckets {
 		b.WriteString("  " + "REPO " + r.Repo + "\n")
 		for i, c := range r.Commits {
