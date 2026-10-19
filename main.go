@@ -334,13 +334,17 @@ func filterCommitsByDate(commits []Commit, w Window) []Commit {
 }
 
 func getDayTotalTime(commits []Commit) string {
+	if len(commits) == 0 {
+		return "0h 0m"
+	}
+
 	earliest := commits[0].AuthorDate
 	latest := commits[len(commits)-1].AuthorDate
 
 	d := latest.Sub(earliest)
-
-	h := int(d.Hours())
-	m := int(d.Minutes()+30) % 60
+	total := int((d + 30*time.Minute).Round(time.Minute).Minutes())
+	h := total / 60
+	m := total % 60
 
 	return fmt.Sprintf("%dh %dm", h, m)
 }
@@ -372,12 +376,8 @@ func summarizeDay(commits []Commit, date time.Time) string {
 	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + getDayTotalTime(sortedByDate) + "\n")
 	for _, r := range repoBuckets {
 		b.WriteString("  " + "REPO " + r.Repo + "\n")
-		for i, c := range r.Commits {
-			b.WriteString("      " + c.AuthorDate.Local().Format("15:04") + " " + c.Subject)
-			if i != len(r.Commits) {
-				b.WriteString("\n")
-
-			}
+		for _, c := range r.Commits {
+			b.WriteString("      " + c.AuthorDate.Local().Format("15:04") + " " + c.Subject + "\n")
 		}
 	}
 
@@ -440,7 +440,6 @@ func main() {
 
 	}
 
-	var message []string
 	var allCommits []Commit
 
 	if len(config.Repos) == 0 {
@@ -473,12 +472,6 @@ func main() {
 		}
 	}
 
-	for d := w.Start; d.Before(w.End); d = d.AddDate(0, 0, 1) {
-		commitsOnDate := filterCommitsByDate(allCommits, Window{d, d.AddDate(0, 0, 1)})
-		summarizeDay(commitsOnDate, d)
-	}
-	os.Exit(1)
-
 	requestURL := os.Getenv("WHATDIDIEVEN_API_URL")
 	if requestURL == "" {
 		requestURL = "http://localhost:8080/v1/chat/completions"
@@ -487,7 +480,17 @@ func main() {
 	if model == "" {
 		model = "local-model"
 	}
-	jsonStr := []byte(fmt.Sprintf(`{
+
+	var b strings.Builder
+
+	for d := w.Start; d.Before(w.End); d = d.AddDate(0, 0, 1) {
+		commitsOnDate := filterCommitsByDate(allCommits, Window{d, d.AddDate(0, 0, 1)})
+		if len(commitsOnDate) == 0 {
+			continue
+		}
+		message := summarizeDay(commitsOnDate, d)
+
+		jsonStr := []byte(fmt.Sprintf(`{
     "model": %q,
     "messages": [
       {
@@ -500,47 +503,49 @@ func main() {
       }
     ],
     "temperature": 0.2
-  }`, model, systemPrompt, strings.Join(message, "\n")))
+  }`, model, systemPrompt, message))
 
-	req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		os.Exit(1)
+		req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			os.Exit(1)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			os.Exit(1)
+		}
+
+		responseBody, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			fmt.Printf("error reading LLM response: %v\n", err)
+			os.Exit(1)
+		}
+
+		if res.StatusCode != http.StatusOK {
+			fmt.Printf("LLM response error (%s): %s\n", res.Status, strings.TrimSpace(string(responseBody)))
+			os.Exit(1)
+		}
+
+		var r Response
+		if err := json.Unmarshal(responseBody, &r); err != nil {
+			fmt.Printf("error decoding response: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(r.Choices) == 0 {
+			fmt.Println("LLM response empty")
+			os.Exit(1)
+		}
+
+		b.WriteString(r.Choices[0].Message.Content)
+
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		os.Exit(1)
-	}
-
-	defer res.Body.Close()
-
-	responseBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		fmt.Printf("error reading LLM response: %v\n", err)
-		os.Exit(1)
-	}
-
-	if res.StatusCode != http.StatusOK {
-		fmt.Printf("LLM response error (%s): %s\n", res.Status, strings.TrimSpace(string(responseBody)))
-		os.Exit(1)
-	}
-
-	var r Response
-	if err := json.Unmarshal(responseBody, &r); err != nil {
-		fmt.Printf("error decoding response: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(r.Choices) == 0 {
-		fmt.Println("LLM response empty")
-		os.Exit(1)
-	}
-
-	fmt.Println(r.Choices[0].Message.Content)
+	fmt.Println(b.String())
 }
