@@ -81,7 +81,7 @@ func mockCommits() []Commit {
 }
 
 func TestSummarizeDay(t *testing.T) {
-	want := `DAY 2026-10-15 Thursday
+	want := `DAY 2026-10-15 Thursday - total time: 6h 55m
   REPO whatdidieven
       09:05 feat: add git repo identifier to commits
       15:30 fix: wrong repo name with empty config
