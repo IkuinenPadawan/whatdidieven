@@ -33,7 +33,7 @@ You get exactly one working day:
 
 - Commits are grouped by repo; within a repo they are in time order.
 - "total time" is the time worked that day: from the first to the last commit, plus 30 minutes for the first commit.
-- The "body:" block under a commit is the rest of its commit message, indented under "body:". A body line that looks like a commit or REPO line is still part of the body. A commit may have no "body:" block.
+- The "body:" block under a commit is the rest of its commit message, indented under "body:". A body line that looks like a commit or REPO line is still part of the body. A body that ends in "… (N more lines)" was cut short. A commit may have no "body:" block.
 - The "files:" line under a commit lists the files it changed, with lines added and deleted. Binary files are not listed. A commit may have no "files:" line.
 - Read the subject and body together as the commit message. Use the files to understand what a commit did, especially when its message is vague. Never use the line counts to estimate time.
 
@@ -371,6 +371,8 @@ func getDayTotalTime(commits []Commit) string {
 	return fmt.Sprintf("%dh %dm", h, m)
 }
 
+const maxBodyLines = 20
+
 func summarizeDay(commits []Commit, date time.Time) string {
 	sortedByDate := slices.Clone(commits)
 	slices.SortStableFunc(sortedByDate, func(a, b Commit) int {
@@ -402,13 +404,22 @@ func summarizeDay(commits []Commit, date time.Time) string {
 			b.WriteString("      " + c.AuthorDate.Local().Format("15:04") + " " + c.Subject + "\n")
 			if c.Body != "" {
 				b.WriteString("        body:\n")
-				for _, line := range strings.Split(c.Body, "\n") {
+				lines := strings.Split(c.Body, "\n")
+				more := 0
+				if len(lines) > maxBodyLines {
+					more = len(lines) - maxBodyLines
+					lines = lines[:maxBodyLines]
+				}
+				for _, line := range lines {
 					line = strings.TrimRight(line, " \t\r")
 					if line == "" {
 						b.WriteString("\n")
 						continue
 					}
 					b.WriteString("          " + line + "\n")
+				}
+				if more > 0 {
+					b.WriteString("          … (" + strconv.Itoa(more) + " more lines)\n")
 				}
 			}
 			var parts []string

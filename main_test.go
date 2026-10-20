@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,6 +74,8 @@ func mockCommits() []Commit {
 			CommitterDate: day.Add(9*time.Hour + 5*time.Minute),
 			Email:         "dev@example.com",
 			Subject:       "docs: update readme",
+			// longer than maxBodyLines, tests truncation; parseCommits trims, leaving 25 lines
+			Body: strings.TrimSpace(strings.Repeat("line\n", 25)),
 			Files: []FileStat{
 				{Added: 12, Deleted: 2, Path: "readme.md"},
 			},
@@ -91,6 +94,8 @@ func TestSummarizeDay(t *testing.T) {
         files: main.go (+4/-1)
   REPO dotfiles
       09:05 docs: update readme
+        body:
+` + strings.Repeat("          line\n", maxBodyLines) + `          … (5 more lines)
         files: readme.md (+12/-2)
       12:45 chore: update wallpaper and fish config
         body:
