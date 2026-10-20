@@ -495,14 +495,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
-		//		for _, p := range commits {
-		//			fmt.Printf("%+v\n", p)
-		//		}
-		//
-		//		os.Exit(1)
-		summarizeDay(allCommits, today)
-		return
-		//		message = append(message, string(commits))
 	} else {
 		for _, repo := range config.Repos {
 			commits, err := fetchCommits(repo, w)
@@ -512,6 +504,11 @@ func main() {
 			}
 			allCommits = append(allCommits, commits...)
 		}
+	}
+
+	if len(allCommits) == 0 {
+		fmt.Println("No commits in the requested window.")
+		return
 	}
 
 	requestURL := os.Getenv("WHATDIDIEVEN_API_URL")
