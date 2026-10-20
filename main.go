@@ -24,17 +24,19 @@ You get exactly one working day:
     DAY <YYYY-MM-DD> <Weekday> - total time: <H>h <M>m
       REPO <repo name>
           <HH:MM> <commit subject>
+            files: <path> (+<added>/-<deleted>), ...
           ...
       REPO <another repo name>
           ...
 
 - Commits are grouped by repo; within a repo they are in time order.
 - "total time" is the time worked that day: from the first to the last commit, plus 30 minutes for the first commit.
-- Only commit subjects are given. No diffs, file names or bodies.
+- The "files:" line under a commit lists the files it changed, with lines added and deleted. Binary files are not listed. A commit may have no "files:" line.
+- Use the files to understand what a commit did, especially when its subject is vague. Never use the line counts to estimate time.
 
 # Steps
 
-1. Group commits into tasks. A task is one piece of work in one repo: commits on the same feature, its tests, fixes and follow-ups. Use shared words, ticket numbers, conventional-commit scopes (feat(auth): ...) and closeness in time. Never put commits from different repos in the same task.
+1. Group commits into tasks. A task is one piece of work in one repo: commits on the same feature, its tests, fixes and follow-ups. Use shared words, ticket numbers, conventional-commit scopes (feat(auth): ...), shared files and closeness in time. Never put commits from different repos in the same task.
 2. Find ticket numbers in the subjects of each task: patterns like PROJ-123. Conventional-commit types and scopes (feat, fix, auth) are not tickets.
 3. Give each commit its time: the first commit of the day gets 30 minutes, every later commit gets the minutes since the previous commit of the day, in any repo. A task's time is the sum of its commits' times.
 4. Round each task to the nearest 0.5h, with at least 0.5h per task.
@@ -52,8 +54,8 @@ Output only the entry below: no introduction, no notes, no code fences.
 - Every line starts with the (repo) prefix. Leave out the [ticket] bracket when the task has no ticket; never write a placeholder.
 - Hours use 0.5h steps written as ~0.5h, ~1h, ~1.5h. Never use minutes.
 - The description is one past-tense phrase, at most 10 words, describing the result for the user or the product ("Added login to the web app"), not the code change ("wired JWT middleware into router"). Do not include commit prefixes like "feat:" or the time.
-- Only describe what the subjects say. Do not invent features, reasons or results.
-- If a subject is too vague to know the intent ("wip", "fix", "stuff"), put it in the task it most likely belongs to; if you have to guess, add (?) right after the description.
+- Only describe what the subjects and files show. Do not invent features, reasons or results.
+- If a subject is too vague to know the intent ("wip", "fix", "stuff"), use its files to put it in the task it most likely belongs to; if you still have to guess, add (?) right after the description.
 
 # Example
 
@@ -62,11 +64,16 @@ Input:
     DAY 2026-03-02 Monday - total time: 4h 32m
       REPO api
           09:10 feat(auth): add login endpoint PROJ-12
+            files: auth/login.go (+84/-0), routes.go (+3/-0)
           09:55 test: cover login endpoint
+            files: auth/login_test.go (+61/-0)
           11:40 docs: document auth API
+            files: docs/auth.md (+40/-2)
       REPO web
           10:30 feat: login form PROJ-12
+            files: src/login/LoginForm.tsx (+120/-0)
           13:12 wip
+            files: src/login/LoginForm.tsx (+35/-12), src/login/login.css (+18/-0)
 
 Commit times: 09:10 30m, 09:55 45m, 10:30 35m, 11:40 70m, 13:12 92m.
 
@@ -74,7 +81,7 @@ Output:
 
     **2026-03-02 (Monday)**
     - (api) [PROJ-12] Added login to the API — ~1.5h
-    - (web) [PROJ-12] Built the login form (?) — ~2h
+    - (web) [PROJ-12] Built the login form — ~2h
     - (api) Documented the authentication API — ~1h
     Total: ~4.5h
 
@@ -384,6 +391,15 @@ func summarizeDay(commits []Commit, date time.Time) string {
 		b.WriteString("  " + "REPO " + r.Repo + "\n")
 		for _, c := range r.Commits {
 			b.WriteString("      " + c.AuthorDate.Local().Format("15:04") + " " + c.Subject + "\n")
+			var parts []string
+			for _, f := range c.Files {
+				if !f.Binary {
+					parts = append(parts, f.Path+" (+"+strconv.Itoa(f.Added)+"/-"+strconv.Itoa(f.Deleted)+")")
+				}
+			}
+			if len(parts) > 0 {
+				b.WriteString("        " + "files: " + strings.Join(parts, ", ") + "\n")
+			}
 		}
 	}
 
