@@ -24,6 +24,8 @@ You get exactly one working day:
     DAY <YYYY-MM-DD> <Weekday> - total time: <H>h <M>m
       REPO <repo name>
           <HH:MM> <commit subject>
+            body:
+              <commit message body, may span several lines>
             files: <path> (+<added>/-<deleted>), ...
           ...
       REPO <another repo name>
@@ -31,13 +33,14 @@ You get exactly one working day:
 
 - Commits are grouped by repo; within a repo they are in time order.
 - "total time" is the time worked that day: from the first to the last commit, plus 30 minutes for the first commit.
+- The "body:" block under a commit is the rest of its commit message, indented under "body:". A body line that looks like a commit or REPO line is still part of the body. A commit may have no "body:" block.
 - The "files:" line under a commit lists the files it changed, with lines added and deleted. Binary files are not listed. A commit may have no "files:" line.
-- Use the files to understand what a commit did, especially when its subject is vague. Never use the line counts to estimate time.
+- Read the subject and body together as the commit message. Use the files to understand what a commit did, especially when its message is vague. Never use the line counts to estimate time.
 
 # Steps
 
 1. Group commits into tasks. A task is one piece of work in one repo: commits on the same feature, its tests, fixes and follow-ups. Use shared words, ticket numbers, conventional-commit scopes (feat(auth): ...), shared files and closeness in time. Never put commits from different repos in the same task.
-2. Find ticket numbers in the subjects of each task: patterns like PROJ-123. Conventional-commit types and scopes (feat, fix, auth) are not tickets.
+2. Find ticket numbers in the subjects and bodies of each task: patterns like PROJ-123. Conventional-commit types and scopes (feat, fix, auth) are not tickets.
 3. Give each commit its time: the first commit of the day gets 30 minutes, every later commit gets the minutes since the previous commit of the day, in any repo. A task's time is the sum of its commits' times.
 4. Round each task to the nearest 0.5h, with at least 0.5h per task.
 5. The day total is the sum of the task hours, and must equal "total time" rounded to the nearest 0.5h (round 15 and 45 minutes up). If the sum does not match, add or remove 0.5h on the largest tasks until it does. Only if there are more tasks than half hours in the total, give every task 0.5h and let the total be their sum.
@@ -54,8 +57,8 @@ Output only the entry below: no introduction, no notes, no code fences.
 - Every line starts with the (repo) prefix. Leave out the [ticket] bracket when the task has no ticket; never write a placeholder.
 - Hours use 0.5h steps written as ~0.5h, ~1h, ~1.5h. Never use minutes.
 - The description is one past-tense phrase, at most 10 words, describing the result for the user or the product ("Added login to the web app"), not the code change ("wired JWT middleware into router"). Do not include commit prefixes like "feat:" or the time.
-- Only describe what the subjects and files show. Do not invent features, reasons or results.
-- If a subject is too vague to know the intent ("wip", "fix", "stuff"), use its files to put it in the task it most likely belongs to; if you still have to guess, add (?) right after the description.
+- Only describe what the subjects, bodies and files show. Do not invent features, reasons or results.
+- If a commit message is too vague to know the intent ("wip", "fix", "stuff"), use its files to put it in the task it most likely belongs to; if you still have to guess, add (?) right after the description.
 
 # Example
 
@@ -66,8 +69,14 @@ Input:
           09:10 feat(auth): add login endpoint PROJ-12
             files: auth/login.go (+84/-0), routes.go (+3/-0)
           09:55 test: cover login endpoint
+            body:
+              Covers the happy path and expired tokens.
+
+              Refresh tokens are not tested yet.
             files: auth/login_test.go (+61/-0)
           11:40 docs: document auth API
+            body:
+              Refs PROJ-14
             files: docs/auth.md (+40/-2)
       REPO web
           10:30 feat: login form PROJ-12
@@ -82,7 +91,7 @@ Output:
     **2026-03-02 (Monday)**
     - (api) [PROJ-12] Added login to the API — ~1.5h
     - (web) [PROJ-12] Built the login form — ~2h
-    - (api) Documented the authentication API — ~1h
+    - (api) [PROJ-14] Documented the authentication API — ~1h
     Total: ~4.5h
 
 The example only shows the format and the method. Never copy its content.`
@@ -391,6 +400,17 @@ func summarizeDay(commits []Commit, date time.Time) string {
 		b.WriteString("  " + "REPO " + r.Repo + "\n")
 		for _, c := range r.Commits {
 			b.WriteString("      " + c.AuthorDate.Local().Format("15:04") + " " + c.Subject + "\n")
+			if c.Body != "" {
+				b.WriteString("        body:\n")
+				for _, line := range strings.Split(c.Body, "\n") {
+					line = strings.TrimRight(line, " \t\r")
+					if line == "" {
+						b.WriteString("\n")
+						continue
+					}
+					b.WriteString("          " + line + "\n")
+				}
+			}
 			var parts []string
 			for _, f := range c.Files {
 				if !f.Binary {
