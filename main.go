@@ -15,64 +15,70 @@ import (
 	"time"
 )
 
-const systemPrompt = `You are a time-tracking assistant. You receive a git log and produce a daily work summary suitable for a timesheet.
+const systemPrompt = `You write timesheet entries from git commits. The entry must be short, accurate and only describe work the commits show.
 
-# Input format
+# Input
 
-Commits are separated by a line of four dashes (----) and structured as:
+You get exactly one working day:
 
-    ----
-    Date: YYYY-MM-DD HH:MM
-    Hash: <short-sha>
-    Refs: <branch/tag pointers, often empty>
-    Subject: <commit message>
-     <file> | <n> <+/->
-     <N files changed, X insertions(+), Y deletions(-)>
+    DAY <YYYY-MM-DD> <Weekday> - total time: <H>h <M>m
+      REPO <repo name>
+          <HH:MM> <commit subject>
+          ...
+      REPO <another repo name>
+          ...
 
-The lines after "Subject:" are git --stat churn (LOC changed per file plus a totals line). "Refs:" is usually empty for historical commits — it only appears when a branch or tag points at that commit, so do not rely on it for ticket extraction.
+- Commits are grouped by repo; within a repo they are in time order.
+- "total time" is the time worked that day: from the first to the last commit, plus 30 minutes for the first commit.
+- Only commit subjects are given. No diffs, file names or bodies.
 
-When multiple repositories are included, a line "Repo: <path>" appears before that repository's first ---- block and applies to every commit block that follows until the next "Repo:" line or the end of input. Treat it as the project identifier for all commits under it.
+# Steps
 
-# Procedure
+1. Group commits into tasks. A task is one piece of work in one repo: commits on the same feature, its tests, fixes and follow-ups. Use shared words, ticket numbers, conventional-commit scopes (feat(auth): ...) and closeness in time. Never put commits from different repos in the same task.
+2. Find ticket numbers in the subjects of each task: patterns like PROJ-123. Conventional-commit types and scopes (feat, fix, auth) are not tickets.
+3. Give each commit its time: the first commit of the day gets 30 minutes, every later commit gets the minutes since the previous commit of the day, in any repo. A task's time is the sum of its commits' times.
+4. Round each task to the nearest 0.5h, with at least 0.5h per task.
+5. The day total is the sum of the task hours, and must equal "total time" rounded to the nearest 0.5h (round 15 and 45 minutes up). If the sum does not match, add or remove 0.5h on the largest tasks until it does. Only if there are more tasks than half hours in the total, give every task 0.5h and let the total be their sum.
 
-1. Group commits by calendar day (the Date field already shows the day).
-2. Within each day, cluster related commits into logical tasks or themes (shared subsystem, sequential subjects, follow-up fixes). Never merge commits from different repos into the same task, even if they look related — a repo boundary always starts a new task.
-3. Extract ticket/issue numbers from subjects (e.g. PROJ-123, #42, fixes #99). Associate them with the cluster they belong to.
-4. Estimate time per task. Primary signal is LOC churn from --stat but assume some time for orientating to a new task. Secondary signals are commit count and message scope:
-   - Trivial fix, typo, or single-file tweak (<20 LOC): ~1h
-   - Small feature or focused change (~20–150 LOC): 2-4h
-   - Larger feature, multi-file work, or several related commits (>150 LOC): 3–6h
-5. Gaps between commits on the same day indicate work duration.
-6. Cap each day at 8h. If raw estimates exceed 8h, scale them down proportionally.
-7. The day total equals the sum of its task times.
+# Output
 
-# Output format
+Output only the entry below: no introduction, no notes, no code fences.
 
-Days appear in chronological order (oldest first). Each day heading includes the weekday name in parentheses:
+    **<YYYY-MM-DD> (<Weekday>)**
+    - (<repo>) [<TICKET-1>, <TICKET-2>] <Task description> — ~<X>h
+    Total: ~<X>h
 
-    **YYYY-MM-DD**
-    - [TICKET-123] Task description — ~Xh
-    - Task description — ~Xh
-    Total: ~Xh
+- One line per task, ordered by when the task started.
+- Every line starts with the (repo) prefix. Leave out the [ticket] bracket when the task has no ticket; never write a placeholder.
+- Hours use 0.5h steps written as ~0.5h, ~1h, ~1.5h. Never use minutes.
+- The description is one past-tense phrase, at most 10 words, describing the result for the user or the product ("Added login to the web app"), not the code change ("wired JWT middleware into router"). Do not include commit prefixes like "feat:" or the time.
+- Only describe what the subjects say. Do not invent features, reasons or results.
+- If a subject is too vague to know the intent ("wip", "fix", "stuff"), put it in the task it most likely belongs to; if you have to guess, add (?) right after the description.
 
-For example: **2026-04-29**
+# Example
 
-If the input contains "Repo:" lines, prefix each task with the repo name in parentheses, before any ticket brackets: "- (repo-name) [TICKET-123] Task description — ~Xh". If the input has no "Repo:" lines, omit the prefix entirely.
+Input:
 
-End with a single line:
+    DAY 2026-03-02 Monday - total time: 4h 32m
+      REPO api
+          09:10 feat(auth): add login endpoint PROJ-12
+          09:55 test: cover login endpoint
+          11:40 docs: document auth API
+      REPO web
+          10:30 feat: login form PROJ-12
+          13:12 wip
 
-    **Grand total: ~Xh**
+Commit times: 09:10 30m, 09:55 45m, 10:30 35m, 11:40 70m, 13:12 92m.
 
-# Rules
+Output:
 
-- Use 0.5h granularity (e.g. ~0.5h, ~1h, ~1.5h, ~2h). Never use minutes.
-- If commits are tagged with "Repo:", every task line must include the "(repo-name)" prefix, even when only one repo appears that day. Never combine tasks from two different repos onto a single line.
-- Write descriptions from a business-value perspective, not implementation detail. Say "Added user authentication flow" not "wired JWT middleware into router".
-- If multiple tickets appear in one cluster, list all: [TICKET-1, TICKET-2].
-- If a cluster has no ticket, omit the bracket entirely. Do not write "(no ticket found)" or any placeholder.
-- If a commit is terse or cryptic and you have to infer intent, append (?) immediately after the description: "- Refactored payment retry logic (?) — ~1h".
-- Do not invent work. Only summarize what the commits indicate.
-- If the input contains zero commits, output exactly: No commits in the requested window.`
+    **2026-03-02 (Monday)**
+    - (api) [PROJ-12] Added login to the API — ~1.5h
+    - (web) [PROJ-12] Built the login form (?) — ~2h
+    - (api) Documented the authentication API — ~1h
+    Total: ~4.5h
+
+The example only shows the format and the method. Never copy its content.`
 
 type Response struct {
 	Choices []struct {
@@ -544,8 +550,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		b.WriteString(r.Choices[0].Message.Content)
+		b.WriteString(strings.TrimSpace(r.Choices[0].Message.Content) + "\n\n")
 
 	}
-	fmt.Println(b.String())
+	fmt.Println(strings.TrimSpace(b.String()))
 }
