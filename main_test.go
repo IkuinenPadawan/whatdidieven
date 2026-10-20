@@ -59,7 +59,7 @@ func mockCommits() []Commit {
 			CommitterDate: day.Add(13 * time.Hour),
 			Email:         "dev@example.com",
 			Subject:       "chore: update wallpaper and fish config",
-			Body:          "Swap the wallpaper.\n\nAlso tweak the prompt.",
+			Body:          "Swap the wallpaper.\nAlso tweak the prompt.",
 			Files: []FileStat{
 				{Added: 0, Deleted: 0, Path: "wall.png", Binary: true},
 				{Added: 7, Deleted: 2, Path: "config.fish"},
@@ -86,11 +86,16 @@ func TestSummarizeDay(t *testing.T) {
       09:05 feat: add git repo identifier to commits
         files: main.go (+25/-3), main_test.go (+12/-0)
       15:30 fix: wrong repo name with empty config
+        body:
+          Fall back to the directory name when config.Repos is empty.
         files: main.go (+4/-1)
   REPO dotfiles
       09:05 docs: update readme
         files: readme.md (+12/-2)
       12:45 chore: update wallpaper and fish config
+        body:
+          Swap the wallpaper.
+          Also tweak the prompt.
         files: config.fish (+7/-2)
 `
 	got := summarizeDay(mockCommits(), time.Date(2026, 10, 15, 0, 0, 0, 0, time.Local))
