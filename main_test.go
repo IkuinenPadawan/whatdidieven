@@ -84,10 +84,14 @@ func TestSummarizeDay(t *testing.T) {
 	want := `DAY 2026-10-15 Thursday - total time: 6h 55m
   REPO whatdidieven
       09:05 feat: add git repo identifier to commits
+        files: main.go (+25/-3), main_test.go (+12/-0)
       15:30 fix: wrong repo name with empty config
+        files: main.go (+4/-1)
   REPO dotfiles
       09:05 docs: update readme
+        files: readme.md (+12/-2)
       12:45 chore: update wallpaper and fish config
+        files: config.fish (+7/-2)
 `
 	got := summarizeDay(mockCommits(), time.Date(2026, 10, 15, 0, 0, 0, 0, time.Local))
 
