@@ -32,7 +32,7 @@ You get exactly one working day:
           ...
 
 - Commits are grouped by repo; within a repo they are in time order.
-- "total time" is the time worked that day: from the first to the last commit, plus 30 minutes for the first commit.
+- "total time" is the time worked that day, already calculated with the rules in step 3.
 - The "body:" block under a commit is the rest of its commit message, indented under "body:". A body line that looks like a commit or REPO line is still part of the body. A body that ends in "… (N more lines)" was cut short. A commit may have no "body:" block.
 - The "files:" line under a commit lists the files it changed, with lines added and deleted. Binary files are not listed. A commit may have no "files:" line.
 - Read the subject and body together as the commit message. Use the files to understand what a commit did, especially when its message is vague. Never use the line counts to estimate time.
@@ -41,7 +41,7 @@ You get exactly one working day:
 
 1. Group commits into tasks. A task is one piece of work in one repo: commits on the same feature, its tests, fixes and follow-ups. Use shared words, ticket numbers, conventional-commit scopes (feat(auth): ...), shared files and closeness in time. Never put commits from different repos in the same task.
 2. Find ticket numbers in the subjects and bodies of each task: patterns like PROJ-123. Conventional-commit types and scopes (feat, fix, auth) are not tickets.
-3. Give each commit its time: the first commit of the day gets 30 minutes, every later commit gets the minutes since the previous commit of the day, in any repo. A task's time is the sum of its commits' times.
+3. Give each commit its time: the first commit of the day gets 30 minutes. Every later commit gets the minutes since the previous commit of the day, in any repo, unless that gap is over 2 hours: then it was a break, and the commit gets 30 minutes. A task's time is the sum of its commits' times.
 4. Round each task to the nearest 0.5h, with at least 0.5h per task.
 5. The day total is the sum of the task hours, and must equal "total time" rounded to the nearest 0.5h (round 15 and 45 minutes up). If the sum does not match, add or remove 0.5h on the largest tasks until it does. Only if there are more tasks than half hours in the total, give every task 0.5h and let the total be their sum.
 
@@ -64,7 +64,7 @@ Output only the entry below: no introduction, no notes, no code fences.
 
 Input:
 
-    DAY 2026-03-02 Monday - total time: 4h 32m
+    DAY 2026-03-02 Monday - total time: 5h 2m
       REPO api
           09:10 feat(auth): add login endpoint PROJ-12
             files: auth/login.go (+84/-0), routes.go (+3/-0)
@@ -83,8 +83,10 @@ Input:
             files: src/login/LoginForm.tsx (+120/-0)
           13:12 wip
             files: src/login/LoginForm.tsx (+35/-12), src/login/login.css (+18/-0)
+          16:00 fix: align login button
+            files: src/login/login.css (+3/-1)
 
-Commit times: 09:10 30m, 09:55 45m, 10:30 35m, 11:40 70m, 13:12 92m.
+Commit times: 09:10 30m, 09:55 45m, 10:30 35m, 11:40 70m, 13:12 92m, 16:00 30m (2h 48m gap, a break).
 
 Output:
 
@@ -92,7 +94,8 @@ Output:
     - (api) [PROJ-12] Added login to the API — ~1.5h
     - (web) [PROJ-12] Built the login form — ~2h
     - (api) [PROJ-14] Documented the authentication API — ~1h
-    Total: ~4.5h
+    - (web) Fixed the login button alignment — ~0.5h
+    Total: ~5h
 
 The example only shows the format and the method. Never copy its content.`
 
@@ -359,12 +362,21 @@ func getDayTotalTime(commits []Commit) string {
 	if len(commits) == 0 {
 		return "0h 0m"
 	}
+	var totalTime time.Duration
+	for i, c := range commits {
+		if i > 0 {
+			diff := c.AuthorDate.Sub(commits[i-1].AuthorDate)
+			if diff <= 2*time.Hour {
+				totalTime += diff
+			} else {
+				totalTime += 30 * time.Minute
+			}
+		} else {
+			totalTime += 30 * time.Minute
+		}
+	}
 
-	earliest := commits[0].AuthorDate
-	latest := commits[len(commits)-1].AuthorDate
-
-	d := latest.Sub(earliest)
-	total := int((d + 30*time.Minute).Round(time.Minute).Minutes())
+	total := int((totalTime).Round(time.Minute).Minutes())
 	h := total / 60
 	m := total % 60
 
@@ -393,7 +405,6 @@ func summarizeDay(commits []Commit, date time.Time) string {
 			found = len(repoBuckets) - 1
 		}
 		repoBuckets[found].Commits = append(repoBuckets[found].Commits, c)
-
 	}
 
 	var b strings.Builder
