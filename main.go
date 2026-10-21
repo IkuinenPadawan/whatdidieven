@@ -108,7 +108,9 @@ type Response struct {
 }
 
 type Config struct {
-	Repos []string `json:"repos"`
+	Repos           []string `json:"repos"`
+	BreakGapMinutes int      `json:"break_gap_minutes,omitempty"`
+	LeadInMinutes   int      `json:"lead_in_minutes,omitempty"`
 }
 
 type Window struct {
@@ -165,18 +167,25 @@ func createConfigFile() {
 	}
 }
 
+func defaultConfig() Config {
+	return Config{BreakGapMinutes: 120, LeadInMinutes: 30}
+}
+
 func readConfig() Config {
 	configDir, err := os.UserConfigDir()
-	var config Config
+	if err != nil {
+		return defaultConfig()
+	}
+	config := defaultConfig()
 	data, err := os.ReadFile(filepath.Join(configDir, "whatdidieven", "config.json"))
 	if err != nil {
-		return Config{}
+		return config
 	}
 	if len(data) > 0 {
 		err = json.Unmarshal(data, &config)
 		if err != nil {
 			fmt.Println("error unmarshaling config:", err)
-			return Config{}
+			return defaultConfig()
 		}
 	}
 	return config
@@ -358,7 +367,7 @@ func filterCommitsByDate(commits []Commit, w Window) []Commit {
 	return keep
 }
 
-func getDayTotalTime(commits []Commit) string {
+func getDayTotalTime(commits []Commit, breakGap time.Duration, leadIn time.Duration) string {
 	if len(commits) == 0 {
 		return "0h 0m"
 	}
@@ -366,13 +375,13 @@ func getDayTotalTime(commits []Commit) string {
 	for i, c := range commits {
 		if i > 0 {
 			diff := c.AuthorDate.Sub(commits[i-1].AuthorDate)
-			if diff <= 2*time.Hour {
+			if diff <= breakGap {
 				totalTime += diff
 			} else {
-				totalTime += 30 * time.Minute
+				totalTime += leadIn
 			}
 		} else {
-			totalTime += 30 * time.Minute
+			totalTime += leadIn
 		}
 	}
 
@@ -385,7 +394,7 @@ func getDayTotalTime(commits []Commit) string {
 
 const maxBodyLines = 20
 
-func summarizeDay(commits []Commit, date time.Time) string {
+func summarizeDay(commits []Commit, date time.Time, breakGap time.Duration, leadIn time.Duration) string {
 	sortedByDate := slices.Clone(commits)
 	slices.SortStableFunc(sortedByDate, func(a, b Commit) int {
 		return a.AuthorDate.Compare(b.AuthorDate)
@@ -408,7 +417,7 @@ func summarizeDay(commits []Commit, date time.Time) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + getDayTotalTime(sortedByDate) + "\n")
+	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + getDayTotalTime(sortedByDate, breakGap, leadIn) + "\n")
 	for _, r := range repoBuckets {
 		b.WriteString("  " + "REPO " + r.Repo + "\n")
 		for _, c := range r.Commits {
@@ -468,6 +477,8 @@ func fetchCommits(repo string, w Window) ([]Commit, error) {
 func main() {
 	createConfigFile()
 	config := readConfig()
+	breakGap := time.Duration(config.BreakGapMinutes) * time.Minute
+	leadIn := time.Duration(config.LeadInMinutes) * time.Minute
 	var w Window
 	now := time.Now()
 	today := startOfDay(now)
@@ -549,7 +560,7 @@ func main() {
 		if len(commitsOnDate) == 0 {
 			continue
 		}
-		message := summarizeDay(commitsOnDate, d)
+		message := summarizeDay(commitsOnDate, d, breakGap, leadIn)
 
 		jsonStr := []byte(fmt.Sprintf(`{
     "model": %q,

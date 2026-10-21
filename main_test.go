@@ -103,7 +103,7 @@ func TestSummarizeDay(t *testing.T) {
           Also tweak the prompt.
         files: config.fish (+7/-2)
 `
-	got := summarizeDay(mockCommits(), time.Date(2026, 10, 15, 0, 0, 0, 0, time.Local))
+	got := summarizeDay(mockCommits(), time.Date(2026, 10, 15, 0, 0, 0, 0, time.Local), 2*time.Hour, 30*time.Minute)
 
 	if got != want {
 		t.Errorf("summarizeDay mismatch\ngot:\n%s\nwant:\n%s", got, want)
@@ -133,7 +133,7 @@ func TestGetDayTotalTime(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := getDayTotalTime(tt.commits); got != tt.want {
+			if got := getDayTotalTime(tt.commits, 2*time.Hour, 30*time.Minute); got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
