@@ -23,6 +23,7 @@ You get exactly one working day:
 
     DAY <YYYY-MM-DD> <Weekday> - total time: <H>h <M>m
       REPO <repo name>
+        BRANCH <branch name>
           <HH:MM> <commit subject>
             body:
               <commit message body, may span several lines>
@@ -32,6 +33,7 @@ You get exactly one working day:
           ...
 
 - Commits are grouped by repo; within a repo they are in time order.
+- A "BRANCH" line names the branch of the commits below it, until the next BRANCH line. Commits with an unknown branch have no BRANCH line above them. A main or master branch says nothing about the task.
 - "total time" is the time worked that day, already calculated with the rules in step 3.
 - The "body:" block under a commit is the rest of its commit message, indented under "body:". A body line that looks like a commit or REPO line is still part of the body. A body that ends in "… (N more lines)" was cut short. A commit may have no "body:" block.
 - The "files:" line under a commit lists the files it changed, with lines added and deleted. Binary files are not listed. A commit may have no "files:" line.
@@ -39,8 +41,8 @@ You get exactly one working day:
 
 # Steps
 
-1. Group commits into tasks. A task is one piece of work in one repo: commits on the same feature, its tests, fixes and follow-ups. Use shared words, ticket numbers, conventional-commit scopes (feat(auth): ...), shared files and closeness in time. Never put commits from different repos in the same task.
-2. Find ticket numbers in the subjects and bodies of each task: patterns like PROJ-123. Conventional-commit types and scopes (feat, fix, auth) are not tickets.
+1. Group commits into tasks. A task is one piece of work in one repo: commits on the same feature, its tests, fixes and follow-ups. Use the branch, shared words, ticket numbers, conventional-commit scopes (feat(auth): ...), shared files and closeness in time. Never put commits from different repos in the same task.
+2. Find ticket numbers in the branch names, subjects and bodies of each task: patterns like PROJ-123. Conventional-commit types and scopes (feat, fix, auth) are not tickets.
 3. Give each commit its time: the first commit of the day gets 30 minutes. Every later commit gets the minutes since the previous commit of the day, in any repo, unless that gap is over 2 hours: then it was a break, and the commit gets 30 minutes. A task's time is the sum of its commits' times.
 4. Round each task to the nearest 0.5h, with at least 0.5h per task.
 5. The day total is the sum of the task hours, and must equal "total time" rounded to the nearest 0.5h (round 15 and 45 minutes up). If the sum does not match, add or remove 0.5h on the largest tasks until it does. Only if there are more tasks than half hours in the total, give every task 0.5h and let the total be their sum.
@@ -66,6 +68,7 @@ Input:
 
     DAY 2026-03-02 Monday - total time: 5h 2m
       REPO api
+        BRANCH main
           09:10 feat(auth): add login endpoint PROJ-12
             files: auth/login.go (+84/-0), routes.go (+3/-0)
           09:55 test: cover login endpoint
@@ -79,10 +82,12 @@ Input:
               Refs PROJ-14
             files: docs/auth.md (+40/-2)
       REPO web
-          10:30 feat: login form PROJ-12
+        BRANCH feature/PROJ-12-login-form
+          10:30 feat: login form
             files: src/login/LoginForm.tsx (+120/-0)
           13:12 wip
             files: src/login/LoginForm.tsx (+35/-12), src/login/login.css (+18/-0)
+        BRANCH fix/login-button
           16:00 fix: align login button
             files: src/login/login.css (+3/-1)
 
@@ -420,7 +425,16 @@ func summarizeDay(commits []Commit, date time.Time, breakGap time.Duration, lead
 	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + getDayTotalTime(sortedByDate, breakGap, leadIn) + "\n")
 	for _, r := range repoBuckets {
 		b.WriteString("  " + "REPO " + r.Repo + "\n")
+		var curBranch string
 		for _, c := range r.Commits {
+			branch := strings.TrimPrefix(c.Ref, "refs/heads/")
+			branch = strings.TrimPrefix(branch, "refs/remotes/origin/")
+			if branch != curBranch {
+				curBranch = branch
+				if branch != "" {
+					b.WriteString("    BRANCH " + branch + "\n")
+				}
+			}
 			b.WriteString("      " + c.AuthorDate.Local().Format("15:04") + " " + c.Subject + "\n")
 			if c.Body != "" {
 				b.WriteString("        body:\n")

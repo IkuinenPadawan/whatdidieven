@@ -31,7 +31,7 @@ func mockCommits() []Commit {
 			Subject:       "fix: wrong repo name with empty config",
 			Body:          "Fall back to the directory name when config.Repos is empty.",
 			Decoration:    "HEAD -> betterer",
-			Ref:           "refs/heads/betterer",
+			Ref:           "refs/heads/hotfix",
 			Files: []FileStat{
 				{Added: 4, Deleted: 1, Path: "main.go"},
 			},
@@ -86,8 +86,10 @@ func mockCommits() []Commit {
 func TestSummarizeDay(t *testing.T) {
 	want := `DAY 2026-10-15 Thursday - total time: 1h 30m
   REPO whatdidieven
+    BRANCH betterer
       09:05 feat: add git repo identifier to commits
         files: main.go (+25/-3), main_test.go (+12/-0)
+    BRANCH hotfix
       15:30 fix: wrong repo name with empty config
         body:
           Fall back to the directory name when config.Repos is empty.
