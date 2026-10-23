@@ -24,24 +24,22 @@ cd ~/code/my-project && whatdidieven this-week
 
 It's Friday at 16:47. Your timesheet is empty. Monday's a blur, Tuesday is a complete mystery, and Wednesday you're pretty sure you were in meetings. Or was that Thursday? You stare at `git log`, find a commit called `fix: actually fix it this time` from a day you have no memory of, and somehow that's supposed to become billable hours.
 
-This tool does it for you. It groups related commits into tasks, pulls out ticket IDs, and estimates effort from diff size. Descriptions read like business value, not implementation detail. Pertsi-you can finally clock out.
+This tool does it for you. It groups related commits into tasks, pulls out ticket IDs, and calculates time from the gaps between your commits. Descriptions read like business value, not implementation detail. Pertsi-you can finally clock out.
 
 ## Example
 
 ```
 $ whatdidieven this-week
 
-**2026-04-27**
-- [PROJ-412] Implemented session token rotation — ~2h
-- Refactored config loader for multi-repo support — ~1.5h
+**2026-04-27 (Monday)**
+- (api) [PROJ-412] Implemented session token rotation — ~2h
+- (cli) Refactored config loader for multi-repo support — ~1.5h
 Total: ~3.5h
 
-**2026-04-29**
-- [PROJ-418, PROJ-420] Added retry logic to payment webhook — ~3h
-- Fixed flaky integration test (?) — ~0.5h
+**2026-04-29 (Wednesday)**
+- (api) [PROJ-418, PROJ-420] Added retry logic to payment webhook — ~3h
+- (api) Fixed flaky integration test (?) — ~0.5h
 Total: ~3.5h
-
-**Grand total: ~7h**
 ```
 
 ## Future Features
@@ -51,7 +49,8 @@ Total: ~3.5h
 - Including stats of work done by AI agents
 
 ## Current limitations
-- Time estimations are aggressively shook from the sleeve of the LLM and are quite off many times
+- Time is calculated from gaps between commits, so it is only a proxy for real work time. The first commit of a day (and the first after a long break) gets a fixed lead-in guess, and gaps longer than the break gap count as breaks.
+- Task grouping and descriptions still come from the LLM and can be off on vague commit messages.
 
 ## Install
 
@@ -79,10 +78,10 @@ Run from inside any git repository:
 
 ```sh
 whatdidieven            # defaults to today
-whatdidieven today      # commits from today
+whatdidieven today      # commits from today (local calendar day)
 whatdidieven yesterday  # commits from yesterday
-whatdidieven this-week  # commits since last Monday
-whatdidieven last-week  # commits last week
+whatdidieven this-week  # commits since this week's Monday
+whatdidieven last-week  # commits from last Monday to Sunday
 whatdidieven add        # adds the current working directory git repo to config
 ```
 
@@ -106,7 +105,15 @@ whatdidieven looks for a config file at:
 │ Windows  │ %AppData%\whatdidieven\config.json                                                      │
 └──────────┴─────────────────────────────────────────────────────────────────────────────────────────┘
 
-The file is optional. If it doesn't exist, the tool creates an empty `config.json` at that path on first run and runs against the current working directory.
+The file is optional. If it doesn't exist, the tool creates an empty `config.json` at that path on first run and runs against the current working directory with default settings.
+
+Available keys:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `repos` | `[]` | Repositories to include. If empty, the current working directory is used. |
+| `break_gap_minutes` | `120` | A gap between two commits longer than this counts as a break, not work time. |
+| `lead_in_minutes` | `30` | Time credited to the first commit of a day, and to the first commit after a break. |
 
 Add current working directory git repo to the config:
 ```sh
@@ -126,7 +133,7 @@ To pull commits from multiple repositories in one summary, list their paths (or 
   }
 ```
 
-  All repos are queried for the same time window and the combined log is sent to the LLM as a single summary.
+All repos are queried for the same time window. Commits are merged and grouped per day, and each day is summarized in its own LLM request. A repo that fails (e.g. a missing path or no `user.email`) is skipped with a warning.
 
 ### Custom endpoint
 
@@ -155,12 +162,13 @@ If unset, the request uses `local-model`.
 
 ## How it works
 
-1. Shells out to `git log --no-merges --decorate=full --stat --author=` for the requested window, where the author is read from `git config user.email` (checked per-repo, so a repo-local override is respected). This filters the log to your own commits. `user.email` must be set, or the tool errors out.
-2. Formats each commit with date, hash, subject, and per-file churn.
-3. POSTs the log to `http://localhost:8080/v1/chat/completions` with a system prompt tuned for timesheet generation.
-4. Prints the model's reply.
+1. Runs `git log --branches --remotes --no-merges --numstat --source` per repo for the requested window (padded by a couple of days, then filtered by author date). The author is read from `git config user.email` (checked per-repo, so a repo-local override is respected), which filters the log to your own commits. `user.email` must be set, or that repo errors out.
+2. Sorts commits by time and calculates a duration for each: the gap to the previous commit, or the lead-in time for the first commit of a day or after a gap longer than the break gap. The durations sum to the day's total time.
+3. Builds one input per day with the repo, branch, time range, duration, subject, body (capped at 20 lines) and changed files of every commit.
+4. POSTs each day to `http://localhost:8080/v1/chat/completions` with a system prompt tuned for timesheet generation. If there are no commits in the window, it prints "No commits in the requested window." without calling the LLM.
+5. Prints the model's reply for each day.
 
-The system prompt enforces 0.5h granularity, an 8h daily cap, business-value descriptions, and a `(?)` marker on guesses. See [`main.go`](./main.go) for the full prompt.
+The LLM groups commits into tasks, extracts ticket numbers (also from branch names), writes business-value descriptions, and rounds task hours to 0.5h so they add up to the calculated day total. Guesses are marked with `(?)`. Line counts help it understand what a commit did, but are never used to estimate time. See [`main.go`](./main.go) for the full prompt.
 
 ## LLM server
 

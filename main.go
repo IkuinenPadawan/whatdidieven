@@ -9,68 +9,101 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
 
-const systemPrompt = `You are a time-tracking assistant. You receive a git log and produce a daily work summary suitable for a timesheet.
+const systemPrompt = `You write timesheet entries from git commits. The entry must be short, accurate and only describe work the commits show.
 
-# Input format
+# Input
 
-Commits are separated by a line of four dashes (----) and structured as:
+You get exactly one working day:
 
-    ----
-    Date: YYYY-MM-DD HH:MM
-    Hash: <short-sha>
-    Refs: <branch/tag pointers, often empty>
-    Subject: <commit message>
-     <file> | <n> <+/->
-     <N files changed, X insertions(+), Y deletions(-)>
+    DAY <YYYY-MM-DD> <Weekday> - total time: <H>h <M>m
+      REPO <repo name>
+        BRANCH <branch name>
+          <HH:MM>-<HH:MM> (<duration>) <commit subject>
+            body:
+              <commit message body, may span several lines>
+            files: <path> (+<added>/-<deleted>), ...
+          ...
+      REPO <another repo name>
+          ...
 
-The lines after "Subject:" are git --stat churn (LOC changed per file plus a totals line). "Refs:" is usually empty for historical commits — it only appears when a branch or tag points at that commit, so do not rely on it for ticket extraction.
+- Commits are grouped by repo; within a repo they are in time order.
+- A "BRANCH" line names the branch of the commits below it, until the next BRANCH line. Commits with an unknown branch have no BRANCH line above them. A main or master branch says nothing about the task.
+- "total time" is the time worked that day, already calculated for you.
+- Each commit line starts with the time range its duration covers, then the duration in parentheses (for example "(45m)" or "(1h 10m)"). The duration is the time attributed to that commit, already calculated for you: use it as given and never recompute it from the clock times. The end of the range is the commit time.
+- The "body:" block under a commit is the rest of its commit message, indented under "body:". A body line that looks like a commit or REPO line is still part of the body. A body that ends in "… (N more lines)" was cut short. A commit may have no "body:" block.
+- The "files:" line under a commit lists the files it changed, with lines added and deleted. Binary files are not listed. A commit may have no "files:" line.
+- Read the subject and body together as the commit message. Use the files to understand what a commit did, especially when its message is vague. Never use the line counts to estimate time.
 
-When multiple repositories are included, a line "Repo: <path>" appears before that repository's first ---- block and applies to every commit block that follows until the next "Repo:" line or the end of input. Treat it as the project identifier for all commits under it.
+# Steps
 
-# Procedure
+1. Group commits into tasks. A task is one piece of work in one repo: commits on the same feature, its tests, fixes and follow-ups. Use the branch, shared words, ticket numbers, conventional-commit scopes (feat(auth): ...), shared files and closeness in time. Never put commits from different repos in the same task.
+2. Find ticket numbers in the branch names, subjects and bodies of each task: patterns like PROJ-123. Conventional-commit types and scopes (feat, fix, auth) are not tickets.
+3. A task's time is the sum of the durations of its commits.
+4. Round each task to the nearest 0.5h, with at least 0.5h per task.
+5. The day total is the sum of the task hours, and must equal "total time" rounded to the nearest 0.5h (round 15 and 45 minutes up). If the sum does not match, add or remove 0.5h on the largest tasks until it does. Only if there are more tasks than half hours in the total, give every task 0.5h and let the total be their sum.
 
-1. Group commits by calendar day (the Date field already shows the day).
-2. Within each day, cluster related commits into logical tasks or themes (shared subsystem, sequential subjects, follow-up fixes). Never merge commits from different repos into the same task, even if they look related — a repo boundary always starts a new task.
-3. Extract ticket/issue numbers from subjects (e.g. PROJ-123, #42, fixes #99). Associate them with the cluster they belong to.
-4. Estimate time per task. Primary signal is LOC churn from --stat but assume some time for orientating to a new task. Secondary signals are commit count and message scope:
-   - Trivial fix, typo, or single-file tweak (<20 LOC): ~1h
-   - Small feature or focused change (~20–150 LOC): 2-4h
-   - Larger feature, multi-file work, or several related commits (>150 LOC): 3–6h
-5. Gaps between commits on the same day indicate work duration.
-6. Cap each day at 8h. If raw estimates exceed 8h, scale them down proportionally.
-7. The day total equals the sum of its task times.
+# Output
 
-# Output format
+Output only the entry below: no introduction, no notes, no code fences.
 
-Days appear in chronological order (oldest first). Each day heading includes the weekday name in parentheses:
+    **<YYYY-MM-DD> (<Weekday>)**
+    - (<repo>) [<TICKET-1>, <TICKET-2>] <Task description> — ~<X>h
+    Total: ~<X>h
 
-    **YYYY-MM-DD**
-    - [TICKET-123] Task description — ~Xh
-    - Task description — ~Xh
-    Total: ~Xh
+- One line per task, ordered by when the task started.
+- Every line starts with the (repo) prefix. Leave out the [ticket] bracket when the task has no ticket; never write a placeholder.
+- Hours use 0.5h steps written as ~0.5h, ~1h, ~1.5h. Never use minutes.
+- The description is one past-tense phrase, at most 10 words, describing the result for the user or the product ("Added login to the web app"), not the code change ("wired JWT middleware into router"). Do not include commit prefixes like "feat:" or the time.
+- Only describe what the subjects, bodies and files show. Do not invent features, reasons or results.
+- If a commit message is too vague to know the intent ("wip", "fix", "stuff"), use its files to put it in the task it most likely belongs to; if you still have to guess, add (?) right after the description.
 
-For example: **2026-04-29**
+# Example
 
-If the input contains "Repo:" lines, prefix each task with the repo name in parentheses, before any ticket brackets: "- (repo-name) [TICKET-123] Task description — ~Xh". If the input has no "Repo:" lines, omit the prefix entirely.
+Input:
 
-End with a single line:
+    DAY 2026-03-02 Monday - total time: 5h 2m
+      REPO api
+        BRANCH main
+          08:40-09:10 (30m) feat(auth): add login endpoint PROJ-12
+            files: auth/login.go (+84/-0), routes.go (+3/-0)
+          09:10-09:55 (45m) test: cover login endpoint
+            body:
+              Covers the happy path and expired tokens.
 
-    **Grand total: ~Xh**
+              Refresh tokens are not tested yet.
+            files: auth/login_test.go (+61/-0)
+          10:30-11:40 (1h 10m) docs: document auth API
+            body:
+              Refs PROJ-14
+            files: docs/auth.md (+40/-2)
+      REPO web
+        BRANCH feature/PROJ-12-login-form
+          09:55-10:30 (35m) feat: login form
+            files: src/login/LoginForm.tsx (+120/-0)
+          11:40-13:12 (1h 32m) wip
+            files: src/login/LoginForm.tsx (+35/-12), src/login/login.css (+18/-0)
+        BRANCH fix/login-button
+          15:30-16:00 (30m) fix: align login button
+            files: src/login/login.css (+3/-1)
 
-# Rules
+Task times: api login 30m + 45m = 75m; web login form 35m + 92m = 127m; api docs 70m; web button 30m. These add up to 5h 2m, which is the day total.
 
-- Use 0.5h granularity (e.g. ~0.5h, ~1h, ~1.5h, ~2h). Never use minutes.
-- If commits are tagged with "Repo:", every task line must include the "(repo-name)" prefix, even when only one repo appears that day. Never combine tasks from two different repos onto a single line.
-- Write descriptions from a business-value perspective, not implementation detail. Say "Added user authentication flow" not "wired JWT middleware into router".
-- If multiple tickets appear in one cluster, list all: [TICKET-1, TICKET-2].
-- If a cluster has no ticket, omit the bracket entirely. Do not write "(no ticket found)" or any placeholder.
-- If a commit is terse or cryptic and you have to infer intent, append (?) immediately after the description: "- Refactored payment retry logic (?) — ~1h".
-- Do not invent work. Only summarize what the commits indicate.
-- If the input contains zero commits, output exactly: No commits in the requested window.`
+Output:
+
+    **2026-03-02 (Monday)**
+    - (api) [PROJ-12] Added login to the API — ~1.5h
+    - (web) [PROJ-12] Built the login form — ~2h
+    - (api) [PROJ-14] Documented the authentication API — ~1h
+    - (web) Fixed the login button alignment — ~0.5h
+    Total: ~5h
+
+The example only shows the format and the method. Never copy its content.`
 
 type Response struct {
 	Choices []struct {
@@ -81,7 +114,17 @@ type Response struct {
 }
 
 type Config struct {
-	Repos []string `json:"repos"`
+	Repos           []string `json:"repos"`
+	BreakGapMinutes int      `json:"break_gap_minutes,omitempty"`
+	LeadInMinutes   int      `json:"lead_in_minutes,omitempty"`
+}
+
+type Window struct {
+	Start, End time.Time
+}
+
+func startOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 func printHelp() {
@@ -130,18 +173,25 @@ func createConfigFile() {
 	}
 }
 
+func defaultConfig() Config {
+	return Config{BreakGapMinutes: 120, LeadInMinutes: 30}
+}
+
 func readConfig() Config {
 	configDir, err := os.UserConfigDir()
-	var config Config
+	if err != nil {
+		return defaultConfig()
+	}
+	config := defaultConfig()
 	data, err := os.ReadFile(filepath.Join(configDir, "whatdidieven", "config.json"))
 	if err != nil {
-		return Config{}
+		return config
 	}
 	if len(data) > 0 {
 		err = json.Unmarshal(data, &config)
 		if err != nil {
 			fmt.Println("error unmarshaling config:", err)
-			return Config{}
+			return defaultConfig()
 		}
 	}
 	return config
@@ -184,8 +234,113 @@ func addRepoToConfig(config Config) error {
 	return nil
 }
 
-func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error) {
-	var cmd *exec.Cmd
+type FileStat struct {
+	Added   int
+	Deleted int
+	Path    string
+	Binary  bool
+}
+
+type Commit struct {
+	Repo          string
+	Hash          string
+	AuthorDate    time.Time
+	CommitterDate time.Time
+	Email         string
+	Subject       string
+	Body          string
+	Decoration    string
+	Ref           string
+	Files         []FileStat
+	Duration      time.Duration
+}
+
+type RepoBucket struct {
+	Repo    string
+	Commits []Commit
+}
+
+func parseFileStats(data []byte) ([]FileStat, error) {
+	var filestats []FileStat
+
+	fileStatLines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+	for i, line := range fileStatLines {
+		if len(line) == 0 {
+			continue
+		}
+		cols := bytes.SplitN(line, []byte("\t"), 3)
+		if len(cols) != 3 {
+			return nil, fmt.Errorf("filestat line %d: expected 3 columns, got %d", i+1, len(cols))
+		}
+		var added, deleted int
+
+		binary := string(cols[0]) == "-" && string(cols[1]) == "-"
+
+		if !binary {
+			var err error
+			added, err = strconv.Atoi(string(cols[0]))
+			if err != nil {
+				return nil, fmt.Errorf("filestat line %d: parse added count %q: %w", i+1, cols[0], err)
+			}
+			deleted, err = strconv.Atoi(string(cols[1]))
+			if err != nil {
+				return nil, fmt.Errorf("filestat line %d: parse deleted count %q: %w", i+1, cols[1], err)
+
+			}
+		}
+		path := string(cols[2])
+		filestats = append(filestats, FileStat{Added: added, Deleted: deleted, Path: path, Binary: binary})
+	}
+	return filestats, nil
+}
+
+func parseCommits(data []byte, repo string) ([]Commit, error) {
+	var commits []Commit
+	parts := bytes.Split(data, []byte("\x1e"))
+
+	for i, part := range parts {
+		commit := Commit{}
+		part = bytes.TrimSpace(part)
+		if len(part) == 0 {
+			continue
+		}
+		header, filestat, found := bytes.Cut(part, []byte("\x1d"))
+		if !found {
+			return nil, fmt.Errorf("record %d: missing header end", i)
+		}
+		filestats, err := parseFileStats(filestat)
+		if err != nil {
+			return nil, fmt.Errorf("record %d: parse filestats: %w", i, err)
+		}
+		commit.Files = filestats
+		fields := bytes.Split(header, []byte("\x1f"))
+		if len(fields) != 8 {
+			return nil, fmt.Errorf("record %d: expected 8 header fields, got %d", i, len(fields))
+		}
+		commit.Hash = string(fields[0])
+		authorT, err := time.Parse(time.RFC3339, string(fields[1]))
+		if err != nil {
+			return nil, fmt.Errorf("record %d: author date: %w", i, err)
+		}
+		commit.AuthorDate = authorT.Local()
+		committerT, err := time.Parse(time.RFC3339, string(fields[2]))
+		if err != nil {
+			return nil, fmt.Errorf("record %d: committer date: %w", i, err)
+		}
+		commit.CommitterDate = committerT.Local()
+		commit.Email = strings.TrimSpace(string(fields[3]))
+		commit.Ref = string(fields[4])
+		commit.Decoration = string(fields[5])
+		commit.Subject = strings.TrimSpace(string(fields[6]))
+		commit.Body = strings.TrimSpace(string(fields[7]))
+		commit.Repo = strings.TrimSpace(filepath.Base(repo))
+
+		commits = append(commits, commit)
+	}
+	return commits, nil
+}
+
+func buildGitCommand(w Window, repo string) (*exec.Cmd, error) {
 	gitAuthorCmd := exec.Command("git", "config", "user.email")
 	gitAuthorCmd.Dir = repo
 	out, err := gitAuthorCmd.Output()
@@ -193,46 +348,200 @@ func buildGitCommand(since string, until string, repo string) (*exec.Cmd, error)
 		return nil, err
 	}
 	gitAuthor := strings.TrimSpace(string(out))
-	if until != "" {
-		cmd = exec.Command("git", "log", since, until, "--all", "--no-merges", "--decorate=full", "--stat",
-			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-			"--date=format:%Y-%m-%d %H:%M",
-			"--author="+gitAuthor)
-	} else {
-		cmd = exec.Command("git", "log", since, "--all", "--no-merges", "--decorate=full", "--stat",
-			"--pretty=format:----%nDate: %ad%nHash: %h%nRefs: %D%nSubject: %s",
-			"--date=format:%Y-%m-%d %H:%M",
-			"--author="+gitAuthor)
-	}
+	since := "--since=" + w.Start.AddDate(0, 0, -2).Format(time.RFC3339)
+	until := "--until=" + w.End.AddDate(0, 0, 1).Format(time.RFC3339)
+
+	args := []string{"log", "--branches", "--remotes", "--no-merges", "--author-date-order",
+		"--author=" + gitAuthor, "--fixed-strings", "--regexp-ignore-case", since, until}
+	// Records: \x1e starts a record, fields split on \x1f, \x1d ends the header, numstat follows.
+	// Fields: hash, author date, committer date, author email, source ref, decorations, subject, body.
+	args = append(args, "-w", "--numstat", "--source",
+		"--pretty=format:%x1e%H%x1f%aI%x1f%cI%x1f%ae%x1f%S%x1f%D%x1f%s%x1f%b%x1d")
+
+	cmd := exec.Command("git", args...)
 	cmd.Dir = repo
 
-	return cmd, err
+	return cmd, nil
+}
+
+func filterCommitsByDate(commits []Commit, w Window) []Commit {
+	var keep []Commit
+	for _, c := range commits {
+		if !c.AuthorDate.Before(w.Start) && c.AuthorDate.Before(w.End) {
+			keep = append(keep, c)
+		}
+	}
+	return keep
+}
+
+func formatDuration(d time.Duration) string {
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+func getDayTotalTime(commits []Commit, breakGap time.Duration, leadIn time.Duration) string {
+	if len(commits) == 0 {
+		return "0h 0m"
+	}
+	var totalTime time.Duration
+	for i, c := range commits {
+		if i > 0 {
+			diff := c.AuthorDate.Sub(commits[i-1].AuthorDate)
+			if diff <= breakGap {
+				totalTime += diff
+			} else {
+				totalTime += leadIn
+			}
+		} else {
+			totalTime += leadIn
+		}
+	}
+
+	total := int((totalTime).Round(time.Minute).Minutes())
+	h := total / 60
+	m := total % 60
+
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+func commitDurations(commits []Commit, breakGap time.Duration, leadIn time.Duration) []Commit {
+
+	for i := range commits {
+		if i > 0 {
+			diff := commits[i].AuthorDate.Sub(commits[i-1].AuthorDate)
+			if diff <= breakGap {
+				commits[i].Duration = diff
+			} else {
+				commits[i].Duration = leadIn
+			}
+		} else {
+			commits[i].Duration = leadIn
+		}
+	}
+
+	return commits
+}
+
+const maxBodyLines = 20
+
+func summarizeDay(commits []Commit, date time.Time, breakGap time.Duration, leadIn time.Duration) string {
+	sortedByDate := slices.Clone(commits)
+	slices.SortStableFunc(sortedByDate, func(a, b Commit) int {
+		return a.AuthorDate.Compare(b.AuthorDate)
+	})
+
+	sortedWithDurations := commitDurations(slices.Clone(sortedByDate), breakGap, leadIn)
+
+	var repoBuckets []RepoBucket
+	for _, c := range sortedWithDurations {
+		found := -1
+		for i := range repoBuckets {
+			if repoBuckets[i].Repo == c.Repo {
+				found = i
+				break
+			}
+		}
+		if found == -1 {
+			repoBuckets = append(repoBuckets, RepoBucket{Repo: c.Repo})
+			found = len(repoBuckets) - 1
+		}
+		repoBuckets[found].Commits = append(repoBuckets[found].Commits, c)
+	}
+
+	var b strings.Builder
+	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + getDayTotalTime(sortedByDate, breakGap, leadIn) + "\n")
+	for _, r := range repoBuckets {
+		b.WriteString("  " + "REPO " + r.Repo + "\n")
+		var curBranch string
+		for _, c := range r.Commits {
+			branch := strings.TrimPrefix(c.Ref, "refs/heads/")
+			branch = strings.TrimPrefix(branch, "refs/remotes/origin/")
+			if branch != curBranch {
+				curBranch = branch
+				if branch != "" {
+					b.WriteString("    BRANCH " + branch + "\n")
+				}
+			}
+			b.WriteString("      " + c.AuthorDate.Add(-c.Duration).Local().Format("15:04") + "-" + c.AuthorDate.Local().Format("15:04") + " " + "(" + formatDuration(c.Duration) + ") " + c.Subject + "\n")
+			if c.Body != "" {
+				b.WriteString("        body:\n")
+				lines := strings.Split(c.Body, "\n")
+				more := 0
+				if len(lines) > maxBodyLines {
+					more = len(lines) - maxBodyLines
+					lines = lines[:maxBodyLines]
+				}
+				for _, line := range lines {
+					line = strings.TrimRight(line, " \t\r")
+					if line == "" {
+						b.WriteString("\n")
+						continue
+					}
+					b.WriteString("          " + line + "\n")
+				}
+				if more > 0 {
+					b.WriteString("          … (" + strconv.Itoa(more) + " more lines)\n")
+				}
+			}
+			var parts []string
+			for _, f := range c.Files {
+				if !f.Binary {
+					parts = append(parts, f.Path+" (+"+strconv.Itoa(f.Added)+"/-"+strconv.Itoa(f.Deleted)+")")
+				}
+			}
+			if len(parts) > 0 {
+				b.WriteString("        " + "files: " + strings.Join(parts, ", ") + "\n")
+			}
+		}
+	}
+
+	return b.String()
+
+}
+
+func fetchCommits(repo string, w Window) ([]Commit, error) {
+	cmd, err := buildGitCommand(w, repo)
+	if err != nil {
+		return nil, fmt.Errorf("%s: build git command: %w", repo, err)
+	}
+	stdout, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s: git log: %w", repo, err)
+	}
+	commits, err := parseCommits(stdout, repo)
+	if err != nil {
+		return nil, fmt.Errorf("%s: parse commits: %w", repo, err)
+	}
+	return filterCommitsByDate(commits, w), nil
 }
 
 func main() {
 	createConfigFile()
 	config := readConfig()
-	var since string
-	var until string
+	breakGap := time.Duration(config.BreakGapMinutes) * time.Minute
+	leadIn := time.Duration(config.LeadInMinutes) * time.Minute
+	var w Window
 	now := time.Now()
+	today := startOfDay(now)
+	daysBack := (int(now.Weekday()) - 1 + 7) % 7
+	monday := today.AddDate(0, 0, -daysBack)
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "today":
-			since = "--since=" + now.Format("2006-01-02") + " 00:00"
+			w = Window{today, today.AddDate(0, 0, 1)}
 		case "yesterday":
-			yesterday := now.AddDate(0, 0, -1)
-			since = "--since=" + yesterday.Format("2006-01-02") + " 00:00"
-			until = "--until=" + now.Format("2006-01-02") + " 00:00"
+			w = Window{today.AddDate(0, 0, -1), today}
 		case "this-week":
-			daysBack := (int(now.Weekday()) - 1 + 7) % 7
-			lastMonday := now.AddDate(0, 0, -daysBack)
-			since = "--since=" + lastMonday.Format("2006-01-02") + " 00:00"
+			w = Window{monday, today.AddDate(0, 0, 1)}
 		case "last-week":
-			daysBack := (int(now.Weekday()) - 1 + 7) % 7
-			lastWeekMonday := now.AddDate(0, 0, -daysBack-7)
-			since = "--since=" + lastWeekMonday.Format("2006-01-02") + " 00:00"
-			until = "--until=" + now.AddDate(0, 0, -daysBack).Format("2006-01-02") + " 00:00"
+			w = Window{monday.AddDate(0, 0, -7), monday}
+
 		case "add":
 			err := addRepoToConfig(config)
 			if err != nil {
@@ -245,41 +554,40 @@ func main() {
 			printHelp()
 			os.Exit(1)
 		default:
-			since = "--since=" + now.Format("2006-01-02") + " 00:00"
+			w = Window{today, today.AddDate(0, 0, 1)}
 		}
 	} else {
-		since = "--since=" + now.Format("2006-01-02") + " 00:00"
+		w = Window{today, today.AddDate(0, 0, 1)}
+
 	}
 
-	var message []string
+	var allCommits []Commit
 
 	if len(config.Repos) == 0 {
-		cmd, err := buildGitCommand(since, until, "")
+		wd, err := os.Getwd()
 		if err != nil {
-			fmt.Printf("error: %v\n", err)
-			return
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
 		}
-		stdout, err := cmd.Output()
+		allCommits, err = fetchCommits(wd, w)
 		if err != nil {
-			fmt.Printf("error: %v\n", err)
-			return
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
 		}
-		message = append(message, string(stdout))
 	} else {
 		for _, repo := range config.Repos {
-			cmd, err := buildGitCommand(since, until, repo)
+			commits, err := fetchCommits(repo, w)
 			if err != nil {
-				fmt.Printf("error: %v\n", err)
-				return
+				fmt.Fprintln(os.Stderr, "warning:", err)
+				continue
 			}
-			stdout, err := cmd.Output()
-			if err != nil {
-				fmt.Printf("error: %v\n", err)
-				return
-			}
-			message = append(message, "Repo: "+repo)
-			message = append(message, string(stdout))
+			allCommits = append(allCommits, commits...)
 		}
+	}
+
+	if len(allCommits) == 0 {
+		fmt.Println("No commits in the requested window.")
+		return
 	}
 
 	requestURL := os.Getenv("WHATDIDIEVEN_API_URL")
@@ -290,7 +598,17 @@ func main() {
 	if model == "" {
 		model = "local-model"
 	}
-	jsonStr := []byte(fmt.Sprintf(`{
+
+	var b strings.Builder
+
+	for d := w.Start; d.Before(w.End); d = d.AddDate(0, 0, 1) {
+		commitsOnDate := filterCommitsByDate(allCommits, Window{d, d.AddDate(0, 0, 1)})
+		if len(commitsOnDate) == 0 {
+			continue
+		}
+		message := summarizeDay(commitsOnDate, d, breakGap, leadIn)
+
+		jsonStr := []byte(fmt.Sprintf(`{
     "model": %q,
     "messages": [
       {
@@ -303,47 +621,49 @@ func main() {
       }
     ],
     "temperature": 0.2
-  }`, model, systemPrompt, strings.Join(message, "\n")))
+  }`, model, systemPrompt, message))
 
-	req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		os.Exit(1)
+		req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			os.Exit(1)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			os.Exit(1)
+		}
+
+		responseBody, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			fmt.Printf("error reading LLM response: %v\n", err)
+			os.Exit(1)
+		}
+
+		if res.StatusCode != http.StatusOK {
+			fmt.Printf("LLM response error (%s): %s\n", res.Status, strings.TrimSpace(string(responseBody)))
+			os.Exit(1)
+		}
+
+		var r Response
+		if err := json.Unmarshal(responseBody, &r); err != nil {
+			fmt.Printf("error decoding response: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(r.Choices) == 0 {
+			fmt.Println("LLM response empty")
+			os.Exit(1)
+		}
+
+		b.WriteString(strings.TrimSpace(r.Choices[0].Message.Content) + "\n\n")
+
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		os.Exit(1)
-	}
-
-	defer res.Body.Close()
-
-	responseBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		fmt.Printf("error reading LLM response: %v\n", err)
-		os.Exit(1)
-	}
-
-	if res.StatusCode != http.StatusOK {
-		fmt.Printf("LLM response error (%s): %s\n", res.Status, strings.TrimSpace(string(responseBody)))
-		os.Exit(1)
-	}
-
-	var r Response
-	if err := json.Unmarshal(responseBody, &r); err != nil {
-		fmt.Printf("error decoding response: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(r.Choices) == 0 {
-		fmt.Println("LLM response empty")
-		os.Exit(1)
-	}
-
-	fmt.Println(r.Choices[0].Message.Content)
+	fmt.Println(strings.TrimSpace(b.String()))
 }
