@@ -24,7 +24,7 @@ You get exactly one working day:
     DAY <YYYY-MM-DD> <Weekday> - total time: <H>h <M>m
       REPO <repo name>
         BRANCH <branch name>
-          <HH:MM> <commit subject>
+          <HH:MM>-<HH:MM> (<duration>) <commit subject>
             body:
               <commit message body, may span several lines>
             files: <path> (+<added>/-<deleted>), ...
@@ -34,7 +34,8 @@ You get exactly one working day:
 
 - Commits are grouped by repo; within a repo they are in time order.
 - A "BRANCH" line names the branch of the commits below it, until the next BRANCH line. Commits with an unknown branch have no BRANCH line above them. A main or master branch says nothing about the task.
-- "total time" is the time worked that day, already calculated with the rules in step 3.
+- "total time" is the time worked that day, already calculated for you.
+- Each commit line starts with the time range its duration covers, then the duration in parentheses (for example "(45m)" or "(1h 10m)"). The duration is the time attributed to that commit, already calculated for you: use it as given and never recompute it from the clock times. The end of the range is the commit time.
 - The "body:" block under a commit is the rest of its commit message, indented under "body:". A body line that looks like a commit or REPO line is still part of the body. A body that ends in "… (N more lines)" was cut short. A commit may have no "body:" block.
 - The "files:" line under a commit lists the files it changed, with lines added and deleted. Binary files are not listed. A commit may have no "files:" line.
 - Read the subject and body together as the commit message. Use the files to understand what a commit did, especially when its message is vague. Never use the line counts to estimate time.
@@ -43,7 +44,7 @@ You get exactly one working day:
 
 1. Group commits into tasks. A task is one piece of work in one repo: commits on the same feature, its tests, fixes and follow-ups. Use the branch, shared words, ticket numbers, conventional-commit scopes (feat(auth): ...), shared files and closeness in time. Never put commits from different repos in the same task.
 2. Find ticket numbers in the branch names, subjects and bodies of each task: patterns like PROJ-123. Conventional-commit types and scopes (feat, fix, auth) are not tickets.
-3. Give each commit its time: the first commit of the day gets 30 minutes. Every later commit gets the minutes since the previous commit of the day, in any repo, unless that gap is over 2 hours: then it was a break, and the commit gets 30 minutes. A task's time is the sum of its commits' times.
+3. A task's time is the sum of the durations of its commits.
 4. Round each task to the nearest 0.5h, with at least 0.5h per task.
 5. The day total is the sum of the task hours, and must equal "total time" rounded to the nearest 0.5h (round 15 and 45 minutes up). If the sum does not match, add or remove 0.5h on the largest tasks until it does. Only if there are more tasks than half hours in the total, give every task 0.5h and let the total be their sum.
 
@@ -69,29 +70,29 @@ Input:
     DAY 2026-03-02 Monday - total time: 5h 2m
       REPO api
         BRANCH main
-          09:10 feat(auth): add login endpoint PROJ-12
+          08:40-09:10 (30m) feat(auth): add login endpoint PROJ-12
             files: auth/login.go (+84/-0), routes.go (+3/-0)
-          09:55 test: cover login endpoint
+          09:10-09:55 (45m) test: cover login endpoint
             body:
               Covers the happy path and expired tokens.
 
               Refresh tokens are not tested yet.
             files: auth/login_test.go (+61/-0)
-          11:40 docs: document auth API
+          10:30-11:40 (1h 10m) docs: document auth API
             body:
               Refs PROJ-14
             files: docs/auth.md (+40/-2)
       REPO web
         BRANCH feature/PROJ-12-login-form
-          10:30 feat: login form
+          09:55-10:30 (35m) feat: login form
             files: src/login/LoginForm.tsx (+120/-0)
-          13:12 wip
+          11:40-13:12 (1h 32m) wip
             files: src/login/LoginForm.tsx (+35/-12), src/login/login.css (+18/-0)
         BRANCH fix/login-button
-          16:00 fix: align login button
+          15:30-16:00 (30m) fix: align login button
             files: src/login/login.css (+3/-1)
 
-Commit times: 09:10 30m, 09:55 45m, 10:30 35m, 11:40 70m, 13:12 92m, 16:00 30m (2h 48m gap, a break).
+Task times: api login 30m + 45m = 75m; web login form 35m + 92m = 127m; api docs 70m; web button 30m. These add up to 5h 2m, which is the day total.
 
 Output:
 
@@ -251,6 +252,7 @@ type Commit struct {
 	Decoration    string
 	Ref           string
 	Files         []FileStat
+	Duration      time.Duration
 }
 
 type RepoBucket struct {
@@ -372,6 +374,16 @@ func filterCommitsByDate(commits []Commit, w Window) []Commit {
 	return keep
 }
 
+func formatDuration(d time.Duration) string {
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
 func getDayTotalTime(commits []Commit, breakGap time.Duration, leadIn time.Duration) string {
 	if len(commits) == 0 {
 		return "0h 0m"
@@ -397,6 +409,24 @@ func getDayTotalTime(commits []Commit, breakGap time.Duration, leadIn time.Durat
 	return fmt.Sprintf("%dh %dm", h, m)
 }
 
+func commitDurations(commits []Commit, breakGap time.Duration, leadIn time.Duration) []Commit {
+
+	for i := range commits {
+		if i > 0 {
+			diff := commits[i].AuthorDate.Sub(commits[i-1].AuthorDate)
+			if diff <= breakGap {
+				commits[i].Duration = diff
+			} else {
+				commits[i].Duration = leadIn
+			}
+		} else {
+			commits[i].Duration = leadIn
+		}
+	}
+
+	return commits
+}
+
 const maxBodyLines = 20
 
 func summarizeDay(commits []Commit, date time.Time, breakGap time.Duration, leadIn time.Duration) string {
@@ -405,8 +435,10 @@ func summarizeDay(commits []Commit, date time.Time, breakGap time.Duration, lead
 		return a.AuthorDate.Compare(b.AuthorDate)
 	})
 
+	sortedWithDurations := commitDurations(slices.Clone(sortedByDate), breakGap, leadIn)
+
 	var repoBuckets []RepoBucket
-	for _, c := range sortedByDate {
+	for _, c := range sortedWithDurations {
 		found := -1
 		for i := range repoBuckets {
 			if repoBuckets[i].Repo == c.Repo {
@@ -435,7 +467,7 @@ func summarizeDay(commits []Commit, date time.Time, breakGap time.Duration, lead
 					b.WriteString("    BRANCH " + branch + "\n")
 				}
 			}
-			b.WriteString("      " + c.AuthorDate.Local().Format("15:04") + " " + c.Subject + "\n")
+			b.WriteString("      " + c.AuthorDate.Add(-c.Duration).Local().Format("15:04") + "-" + c.AuthorDate.Local().Format("15:04") + " " + "(" + formatDuration(c.Duration) + ") " + c.Subject + "\n")
 			if c.Body != "" {
 				b.WriteString("        body:\n")
 				lines := strings.Split(c.Body, "\n")

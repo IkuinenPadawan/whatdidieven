@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,19 +88,19 @@ func TestSummarizeDay(t *testing.T) {
 	want := `DAY 2026-10-15 Thursday - total time: 1h 30m
   REPO whatdidieven
     BRANCH betterer
-      09:05 feat: add git repo identifier to commits
+      08:35-09:05 (30m) feat: add git repo identifier to commits
         files: main.go (+25/-3), main_test.go (+12/-0)
     BRANCH hotfix
-      15:30 fix: wrong repo name with empty config
+      15:00-15:30 (30m) fix: wrong repo name with empty config
         body:
           Fall back to the directory name when config.Repos is empty.
         files: main.go (+4/-1)
   REPO dotfiles
-      09:05 docs: update readme
+      09:05-09:05 (0m) docs: update readme
         body:
 ` + strings.Repeat("          line\n", maxBodyLines) + `          … (5 more lines)
         files: readme.md (+12/-2)
-      12:45 chore: update wallpaper and fish config
+      12:15-12:45 (30m) chore: update wallpaper and fish config
         body:
           Swap the wallpaper.
           Also tweak the prompt.
@@ -137,6 +138,39 @@ func TestGetDayTotalTime(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := getDayTotalTime(tt.commits, 2*time.Hour, 30*time.Minute); got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommitDurations(t *testing.T) {
+	at := func(h, m int) Commit {
+		return Commit{AuthorDate: time.Date(2026, 10, 15, h, m, 0, 0, time.UTC)}
+	}
+	m := time.Minute
+	// Same rules as getDayTotalTime, one duration per commit, in the order given.
+	// The input is already sorted by AuthorDate.
+	tests := []struct {
+		name    string
+		commits []Commit
+		want    []time.Duration
+	}{
+		{"no commits", nil, nil},
+		{"single commit", []Commit{at(9, 0)}, []time.Duration{30 * m}},
+		{"same minute", []Commit{at(9, 0), at(9, 0)}, []time.Duration{30 * m, 0}},
+		{"one session", []Commit{at(9, 0), at(9, 45), at(11, 0)}, []time.Duration{30 * m, 45 * m, 75 * m}},
+		{"gap of exactly 2h is not a break", []Commit{at(9, 0), at(11, 0)}, []time.Duration{30 * m, 120 * m}},
+		{"gap just over 2h is a break", []Commit{at(9, 0), at(11, 1)}, []time.Duration{30 * m, 30 * m}},
+		{"lunch break", []Commit{at(9, 0), at(10, 0), at(13, 30), at(14, 0)}, []time.Duration{30 * m, 60 * m, 30 * m, 30 * m}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []time.Duration
+			for _, c := range commitDurations(tt.commits, 2*time.Hour, 30*time.Minute) {
+				got = append(got, c.Duration)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
 	}
