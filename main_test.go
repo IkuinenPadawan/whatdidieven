@@ -114,30 +114,28 @@ func TestSummarizeDay(t *testing.T) {
 }
 
 func TestGetDayTotalTime(t *testing.T) {
-	at := func(h, m int) Commit {
-		return Commit{AuthorDate: time.Date(2026, 10, 15, h, m, 0, 0, time.UTC)}
+	m := time.Minute
+	withDurations := func(ds ...time.Duration) []Commit {
+		var commits []Commit
+		for _, d := range ds {
+			commits = append(commits, Commit{Duration: d})
+		}
+		return commits
 	}
-	// A gap over 2h is a break: the commit after it starts a new session and gets 30m.
-	// Every other commit gets the time since the previous commit.
 	tests := []struct {
 		name    string
 		commits []Commit
-		want    string
+		want    time.Duration
 	}{
-		{"no commits", nil, "0h 0m"},
-		{"single commit", []Commit{at(9, 0)}, "0h 30m"},
-		{"same minute", []Commit{at(9, 0), at(9, 0)}, "0h 30m"},
-		{"one session", []Commit{at(9, 0), at(9, 45), at(11, 0)}, "2h 30m"},
-		{"gap of exactly 2h is not a break", []Commit{at(9, 0), at(11, 0)}, "2h 30m"},
-		{"gap just over 2h is a break", []Commit{at(9, 0), at(11, 1)}, "1h 0m"},
-		{"lunch break", []Commit{at(9, 0), at(10, 0), at(13, 30), at(14, 0)}, "2h 30m"},
-		{"lone evening commit", []Commit{at(9, 0), at(10, 30), at(21, 0)}, "2h 30m"},
-		{"two long sessions", []Commit{at(8, 0), at(9, 30), at(11, 0), at(14, 0), at(15, 45), at(17, 30)}, "7h 30m"},
+		{"no commits", nil, 0},
+		{"single commit", withDurations(30 * m), 30 * m},
+		{"zero duration", withDurations(30*m, 0), 30 * m},
+		{"several commits", withDurations(30*m, 45*m, 75*m), 150 * m},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := getDayTotalTime(tt.commits, 2*time.Hour, 30*time.Minute); got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
+			if got := getDayTotalTime(tt.commits); got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -148,7 +146,8 @@ func TestCommitDurations(t *testing.T) {
 		return Commit{AuthorDate: time.Date(2026, 10, 15, h, m, 0, 0, time.UTC)}
 	}
 	m := time.Minute
-	// Same rules as getDayTotalTime, one duration per commit, in the order given.
+	// A gap over 2h is a break: the commit after it starts a new session and gets 30m.
+	// Every other commit gets the time since the previous commit. One duration per commit, in the order given.
 	// The input is already sorted by AuthorDate.
 	tests := []struct {
 		name    string

@@ -384,29 +384,13 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh %dm", h, m)
 }
 
-func getDayTotalTime(commits []Commit, breakGap time.Duration, leadIn time.Duration) string {
-	if len(commits) == 0 {
-		return "0h 0m"
-	}
+func getDayTotalTime(commits []Commit) time.Duration {
 	var totalTime time.Duration
-	for i, c := range commits {
-		if i > 0 {
-			diff := c.AuthorDate.Sub(commits[i-1].AuthorDate)
-			if diff <= breakGap {
-				totalTime += diff
-			} else {
-				totalTime += leadIn
-			}
-		} else {
-			totalTime += leadIn
-		}
+	for _, c := range commits {
+		totalTime += c.Duration
 	}
 
-	total := int((totalTime).Round(time.Minute).Minutes())
-	h := total / 60
-	m := total % 60
-
-	return fmt.Sprintf("%dh %dm", h, m)
+	return totalTime
 }
 
 func commitDurations(commits []Commit, breakGap time.Duration, leadIn time.Duration) []Commit {
@@ -454,7 +438,7 @@ func summarizeDay(commits []Commit, date time.Time, breakGap time.Duration, lead
 	}
 
 	var b strings.Builder
-	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + getDayTotalTime(sortedByDate, breakGap, leadIn) + "\n")
+	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + formatDuration(getDayTotalTime(sortedWithDurations)) + "\n")
 	for _, r := range repoBuckets {
 		b.WriteString("  " + "REPO " + r.Repo + "\n")
 		var curBranch string
