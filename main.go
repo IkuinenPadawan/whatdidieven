@@ -601,6 +601,7 @@ func main() {
 	var allCommits []Commit
 
 	if len(config.Repos) == 0 {
+		fmt.Fprintf(os.Stderr, "Scanning current working directory repo..."+"\n")
 		wd, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -612,6 +613,7 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
+		fmt.Fprintf(os.Stderr, "Scanning %d repos..."+"\n", len(config.Repos))
 		for _, repo := range config.Repos {
 			commits, err := fetchCommits(repo, w)
 			if err != nil {
