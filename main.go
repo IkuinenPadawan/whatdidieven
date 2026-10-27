@@ -593,7 +593,10 @@ func main() {
 
 	var b strings.Builder
 
+	fmt.Fprintf(os.Stderr, "Scanning %d repos..."+"\n", len(config.Repos))
+
 	for d := w.Start; d.Before(w.End); d = d.AddDate(0, 0, 1) {
+		fmt.Fprintf(os.Stderr, "Summarizing %s  %s..."+"\n", d.Weekday(), d.Format("2006-01-02"))
 		commitsOnDate := filterCommitsByDate(allCommits, Window{d, d.AddDate(0, 0, 1)})
 		if len(commitsOnDate) == 0 {
 			continue
