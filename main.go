@@ -507,6 +507,51 @@ func fetchCommits(repo string, w Window) ([]Commit, error) {
 	return filterCommitsByDate(commits, w), nil
 }
 
+func callLLM(requestURL, model, message string) (string, error) {
+	payload, err := json.Marshal(map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": message},
+		},
+		"temperature": 0.2,
+	})
+	req, err := http.NewRequest("POST", requestURL, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+
+	responseBody, err := io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil {
+		return "", err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("LLM response error (%s): %s", res.Status, strings.TrimSpace(string(responseBody)))
+	}
+
+	var r Response
+	if err := json.Unmarshal(responseBody, &r); err != nil {
+		return "", err
+	}
+
+	if len(r.Choices) == 0 {
+		return "", fmt.Errorf("LLM response empty")
+	}
+
+	return strings.TrimSpace(r.Choices[0].Message.Content), nil
+}
+
 func main() {
 	createConfigFile()
 	config := readConfig()
@@ -603,65 +648,17 @@ func main() {
 		}
 		message := summarizeDay(commitsOnDate, d, breakGap, leadIn)
 
-		if !*dryRun {
-			jsonStr := []byte(fmt.Sprintf(`{
-    "model": %q,
-    "messages": [
-      {
-        "role": "system",
-		"content": %q
-      },
-      {
-        "role": "user",
-        "content": %q
-      }
-    ],
-    "temperature": 0.2
-  }`, model, systemPrompt, message))
-
-			req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
-			if err != nil {
-				fmt.Printf("error: %v\n", err)
-				os.Exit(1)
-			}
-			req.Header.Set("Content-Type", "application/json")
-			if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
-				req.Header.Set("Authorization", "Bearer "+apiKey)
-			}
-
-			res, err := http.DefaultClient.Do(req)
-			if err != nil {
-				fmt.Printf("error: %v\n", err)
-				os.Exit(1)
-			}
-
-			responseBody, err := io.ReadAll(res.Body)
-			res.Body.Close()
-			if err != nil {
-				fmt.Printf("error reading LLM response: %v\n", err)
-				os.Exit(1)
-			}
-
-			if res.StatusCode != http.StatusOK {
-				fmt.Printf("LLM response error (%s): %s\n", res.Status, strings.TrimSpace(string(responseBody)))
-				os.Exit(1)
-			}
-
-			var r Response
-			if err := json.Unmarshal(responseBody, &r); err != nil {
-				fmt.Printf("error decoding response: %v\n", err)
-				os.Exit(1)
-			}
-
-			if len(r.Choices) == 0 {
-				fmt.Println("LLM response empty")
-				os.Exit(1)
-			}
-
-			b.WriteString(strings.TrimSpace(r.Choices[0].Message.Content) + "\n\n")
-		} else {
+		if *dryRun {
 			b.WriteString(message + "\n\n")
+			continue
 		}
+
+		summary, err := callLLM(requestURL, model, message)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		b.WriteString(summary + "\n\n")
 
 	}
 	fmt.Println(strings.TrimSpace(b.String()))
