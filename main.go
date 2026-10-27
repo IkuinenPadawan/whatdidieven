@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -117,6 +120,8 @@ type Config struct {
 	Repos           []string `json:"repos"`
 	BreakGapMinutes int      `json:"break_gap_minutes,omitempty"`
 	LeadInMinutes   int      `json:"lead_in_minutes,omitempty"`
+	APIURL          string   `json:"api_url,omitempty"`
+	Model           string   `json:"model,omitempty"`
 }
 
 type Window struct {
@@ -129,13 +134,15 @@ func startOfDay(t time.Time) time.Time {
 
 func printHelp() {
 	fmt.Println(`
-usage: whatdidieven [-h | --help] [today] [yesterday] [this-week] [add]
+usage: whatdidieven [--dry-run] [-h | --help] [today] [yesterday] [this-week] [last-week] [add]
 
 today		Get a summary for today
 yesterday	Get a summary for yesterday
 this-week	Get a summary for this week
 last-week	Get a summary for last week
-add		Add current working directory git repo to config`)
+add		Add current working directory git repo to config
+
+--dry-run	Print context output without LLM query`)
 }
 
 func getConfigFilepath() string {
@@ -384,29 +391,13 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh %dm", h, m)
 }
 
-func getDayTotalTime(commits []Commit, breakGap time.Duration, leadIn time.Duration) string {
-	if len(commits) == 0 {
-		return "0h 0m"
-	}
+func getDayTotalTime(commits []Commit) time.Duration {
 	var totalTime time.Duration
-	for i, c := range commits {
-		if i > 0 {
-			diff := c.AuthorDate.Sub(commits[i-1].AuthorDate)
-			if diff <= breakGap {
-				totalTime += diff
-			} else {
-				totalTime += leadIn
-			}
-		} else {
-			totalTime += leadIn
-		}
+	for _, c := range commits {
+		totalTime += c.Duration
 	}
 
-	total := int((totalTime).Round(time.Minute).Minutes())
-	h := total / 60
-	m := total % 60
-
-	return fmt.Sprintf("%dh %dm", h, m)
+	return totalTime
 }
 
 func commitDurations(commits []Commit, breakGap time.Duration, leadIn time.Duration) []Commit {
@@ -454,7 +445,7 @@ func summarizeDay(commits []Commit, date time.Time, breakGap time.Duration, lead
 	}
 
 	var b strings.Builder
-	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + getDayTotalTime(sortedByDate, breakGap, leadIn) + "\n")
+	b.WriteString("DAY " + date.Local().Format("2006-01-02") + " " + date.Weekday().String() + " - total time: " + formatDuration(getDayTotalTime(sortedWithDurations)) + "\n")
 	for _, r := range repoBuckets {
 		b.WriteString("  " + "REPO " + r.Repo + "\n")
 		var curBranch string
@@ -520,6 +511,59 @@ func fetchCommits(repo string, w Window) ([]Commit, error) {
 	return filterCommitsByDate(commits, w), nil
 }
 
+func callLLM(requestURL, model, message string) (string, error) {
+	payload, err := json.Marshal(map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": message},
+		},
+		"temperature": 0.2,
+	})
+	req, err := http.NewRequest("POST", requestURL, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	res, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
+	if err != nil {
+		var netErr net.Error
+		var opErr *net.OpError
+		switch {
+		case errors.As(err, &netErr) && netErr.Timeout():
+			return "", fmt.Errorf("LLM server at %s didn't answer within %s", requestURL, "5 minutes")
+		case errors.As(err, &opErr) && opErr.Op == "dial":
+			return "", fmt.Errorf("couldn't reach an LLM server at %s\nStart one (see README \"LLM server\") or set WHATDIDIEVEN_API_URL", requestURL)
+		}
+		return "", err
+	}
+
+	responseBody, err := io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil {
+		return "", err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("LLM response error (%s): %s", res.Status, strings.TrimSpace(string(responseBody)))
+	}
+
+	var r Response
+	if err := json.Unmarshal(responseBody, &r); err != nil {
+		return "", err
+	}
+
+	if len(r.Choices) == 0 {
+		return "", fmt.Errorf("LLM response empty")
+	}
+
+	return strings.TrimSpace(r.Choices[0].Message.Content), nil
+}
+
 func main() {
 	createConfigFile()
 	config := readConfig()
@@ -531,39 +575,45 @@ func main() {
 	daysBack := (int(now.Weekday()) - 1 + 7) % 7
 	monday := today.AddDate(0, 0, -daysBack)
 
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "today":
-			w = Window{today, today.AddDate(0, 0, 1)}
-		case "yesterday":
-			w = Window{today.AddDate(0, 0, -1), today}
-		case "this-week":
-			w = Window{monday, today.AddDate(0, 0, 1)}
-		case "last-week":
-			w = Window{monday.AddDate(0, 0, -7), monday}
-
-		case "add":
-			err := addRepoToConfig(config)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			fmt.Println("Repo added to config")
-			os.Exit(1)
-		case "--help", "-h":
-			printHelp()
-			os.Exit(1)
-		default:
-			w = Window{today, today.AddDate(0, 0, 1)}
-		}
-	} else {
+	dryRun := flag.Bool("dry-run", false, "enable dry-run")
+	flag.Usage = printHelp
+	flag.Parse()
+	args := flag.Args()
+	cmd := ""
+	if len(args) > 0 {
+		cmd = args[0]
+		flag.CommandLine.Parse(args[1:])
+	}
+	if flag.NArg() > 0 {
+		fmt.Println("unexpected arguments:", flag.Args())
+		os.Exit(2)
+	}
+	switch cmd {
+	case "today":
 		w = Window{today, today.AddDate(0, 0, 1)}
+	case "yesterday":
+		w = Window{today.AddDate(0, 0, -1), today}
+	case "this-week":
+		w = Window{monday, today.AddDate(0, 0, 1)}
+	case "last-week":
+		w = Window{monday.AddDate(0, 0, -7), monday}
 
+	case "add":
+		err := addRepoToConfig(config)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		fmt.Println("Repo added to config")
+		os.Exit(0)
+	default:
+		w = Window{today, today.AddDate(0, 0, 1)}
 	}
 
 	var allCommits []Commit
 
 	if len(config.Repos) == 0 {
+		fmt.Fprintf(os.Stderr, "Scanning current working directory repo..."+"\n")
 		wd, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -575,6 +625,7 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
+		fmt.Fprintf(os.Stderr, "Scanning %d repos..."+"\n", len(config.Repos))
 		for _, repo := range config.Repos {
 			commits, err := fetchCommits(repo, w)
 			if err != nil {
@@ -592,77 +643,40 @@ func main() {
 
 	requestURL := os.Getenv("WHATDIDIEVEN_API_URL")
 	if requestURL == "" {
-		requestURL = "http://localhost:8080/v1/chat/completions"
+		requestURL = config.APIURL
+		if requestURL == "" {
+			requestURL = "http://localhost:8080/v1/chat/completions"
+		}
 	}
 	model := os.Getenv("WHATDIDIEVEN_MODEL")
 	if model == "" {
-		model = "local-model"
+		model = config.Model
+		if model == "" {
+			model = "local-model"
+		}
 	}
 
 	var b strings.Builder
 
 	for d := w.Start; d.Before(w.End); d = d.AddDate(0, 0, 1) {
+		fmt.Fprintf(os.Stderr, "Summarizing %s  %s..."+"\n", d.Weekday(), d.Format("2006-01-02"))
 		commitsOnDate := filterCommitsByDate(allCommits, Window{d, d.AddDate(0, 0, 1)})
 		if len(commitsOnDate) == 0 {
 			continue
 		}
 		message := summarizeDay(commitsOnDate, d, breakGap, leadIn)
 
-		jsonStr := []byte(fmt.Sprintf(`{
-    "model": %q,
-    "messages": [
-      {
-        "role": "system",
-		"content": %q
-      },
-      {
-        "role": "user",
-        "content": %q
-      }
-    ],
-    "temperature": 0.2
-  }`, model, systemPrompt, message))
+		if *dryRun {
+			b.WriteString(message + "\n\n")
+			continue
+		}
 
-		req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
+		summary, err := callLLM(requestURL, model, message)
 		if err != nil {
-			fmt.Printf("error: %v\n", err)
+			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
-		req.Header.Set("Content-Type", "application/json")
-		if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
-			req.Header.Set("Authorization", "Bearer "+apiKey)
-		}
-
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			fmt.Printf("error: %v\n", err)
-			os.Exit(1)
-		}
-
-		responseBody, err := io.ReadAll(res.Body)
-		res.Body.Close()
-		if err != nil {
-			fmt.Printf("error reading LLM response: %v\n", err)
-			os.Exit(1)
-		}
-
-		if res.StatusCode != http.StatusOK {
-			fmt.Printf("LLM response error (%s): %s\n", res.Status, strings.TrimSpace(string(responseBody)))
-			os.Exit(1)
-		}
-
-		var r Response
-		if err := json.Unmarshal(responseBody, &r); err != nil {
-			fmt.Printf("error decoding response: %v\n", err)
-			os.Exit(1)
-		}
-
-		if len(r.Choices) == 0 {
-			fmt.Println("LLM response empty")
-			os.Exit(1)
-		}
-
-		b.WriteString(strings.TrimSpace(r.Choices[0].Message.Content) + "\n\n")
+		b.WriteString(summary + "\n\n")
 
 	}
 	fmt.Println(strings.TrimSpace(b.String()))
