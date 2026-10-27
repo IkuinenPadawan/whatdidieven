@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -129,13 +130,15 @@ func startOfDay(t time.Time) time.Time {
 
 func printHelp() {
 	fmt.Println(`
-usage: whatdidieven [-h | --help] [today] [yesterday] [this-week] [add]
+usage: whatdidieven [--dry-run] [-h | --help] [today] [yesterday] [this-week] [last-week] [add]
 
 today		Get a summary for today
 yesterday	Get a summary for yesterday
 this-week	Get a summary for this week
 last-week	Get a summary for last week
-add		Add current working directory git repo to config`)
+add		Add current working directory git repo to config
+
+--dry-run	Print context output without LLM query`)
 }
 
 func getConfigFilepath() string {
@@ -515,34 +518,39 @@ func main() {
 	daysBack := (int(now.Weekday()) - 1 + 7) % 7
 	monday := today.AddDate(0, 0, -daysBack)
 
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "today":
-			w = Window{today, today.AddDate(0, 0, 1)}
-		case "yesterday":
-			w = Window{today.AddDate(0, 0, -1), today}
-		case "this-week":
-			w = Window{monday, today.AddDate(0, 0, 1)}
-		case "last-week":
-			w = Window{monday.AddDate(0, 0, -7), monday}
-
-		case "add":
-			err := addRepoToConfig(config)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			fmt.Println("Repo added to config")
-			os.Exit(1)
-		case "--help", "-h":
-			printHelp()
-			os.Exit(1)
-		default:
-			w = Window{today, today.AddDate(0, 0, 1)}
-		}
-	} else {
+	dryRun := flag.Bool("dry-run", false, "enable dry-run")
+	flag.Usage = printHelp
+	flag.Parse()
+	args := flag.Args()
+	cmd := ""
+	if len(args) > 0 {
+		cmd = args[0]
+		flag.CommandLine.Parse(args[1:])
+	}
+	if flag.NArg() > 0 {
+		fmt.Println("unexpected arguments:", flag.Args())
+		os.Exit(2)
+	}
+	switch cmd {
+	case "today":
 		w = Window{today, today.AddDate(0, 0, 1)}
+	case "yesterday":
+		w = Window{today.AddDate(0, 0, -1), today}
+	case "this-week":
+		w = Window{monday, today.AddDate(0, 0, 1)}
+	case "last-week":
+		w = Window{monday.AddDate(0, 0, -7), monday}
 
+	case "add":
+		err := addRepoToConfig(config)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		fmt.Println("Repo added to config")
+		os.Exit(0)
+	default:
+		w = Window{today, today.AddDate(0, 0, 1)}
 	}
 
 	var allCommits []Commit
@@ -592,7 +600,8 @@ func main() {
 		}
 		message := summarizeDay(commitsOnDate, d, breakGap, leadIn)
 
-		jsonStr := []byte(fmt.Sprintf(`{
+		if !*dryRun {
+			jsonStr := []byte(fmt.Sprintf(`{
     "model": %q,
     "messages": [
       {
@@ -607,46 +616,49 @@ func main() {
     "temperature": 0.2
   }`, model, systemPrompt, message))
 
-		req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
-		if err != nil {
-			fmt.Printf("error: %v\n", err)
-			os.Exit(1)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
-			req.Header.Set("Authorization", "Bearer "+apiKey)
-		}
+			req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(jsonStr))
+			if err != nil {
+				fmt.Printf("error: %v\n", err)
+				os.Exit(1)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			if apiKey := os.Getenv("WHATDIDIEVEN_API_KEY"); apiKey != "" {
+				req.Header.Set("Authorization", "Bearer "+apiKey)
+			}
 
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			fmt.Printf("error: %v\n", err)
-			os.Exit(1)
-		}
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				fmt.Printf("error: %v\n", err)
+				os.Exit(1)
+			}
 
-		responseBody, err := io.ReadAll(res.Body)
-		res.Body.Close()
-		if err != nil {
-			fmt.Printf("error reading LLM response: %v\n", err)
-			os.Exit(1)
-		}
+			responseBody, err := io.ReadAll(res.Body)
+			res.Body.Close()
+			if err != nil {
+				fmt.Printf("error reading LLM response: %v\n", err)
+				os.Exit(1)
+			}
 
-		if res.StatusCode != http.StatusOK {
-			fmt.Printf("LLM response error (%s): %s\n", res.Status, strings.TrimSpace(string(responseBody)))
-			os.Exit(1)
-		}
+			if res.StatusCode != http.StatusOK {
+				fmt.Printf("LLM response error (%s): %s\n", res.Status, strings.TrimSpace(string(responseBody)))
+				os.Exit(1)
+			}
 
-		var r Response
-		if err := json.Unmarshal(responseBody, &r); err != nil {
-			fmt.Printf("error decoding response: %v\n", err)
-			os.Exit(1)
-		}
+			var r Response
+			if err := json.Unmarshal(responseBody, &r); err != nil {
+				fmt.Printf("error decoding response: %v\n", err)
+				os.Exit(1)
+			}
 
-		if len(r.Choices) == 0 {
-			fmt.Println("LLM response empty")
-			os.Exit(1)
-		}
+			if len(r.Choices) == 0 {
+				fmt.Println("LLM response empty")
+				os.Exit(1)
+			}
 
-		b.WriteString(strings.TrimSpace(r.Choices[0].Message.Content) + "\n\n")
+			b.WriteString(strings.TrimSpace(r.Choices[0].Message.Content) + "\n\n")
+		} else {
+			b.WriteString(message + "\n\n")
+		}
 
 	}
 	fmt.Println(strings.TrimSpace(b.String()))
