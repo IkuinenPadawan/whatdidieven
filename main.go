@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -525,8 +527,16 @@ func callLLM(requestURL, model, message string) (string, error) {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
 	if err != nil {
+		var netErr net.Error
+		var opErr *net.OpError
+		switch {
+		case errors.As(err, &netErr) && netErr.Timeout():
+			return "", fmt.Errorf("LLM server at %s didn't answer within %s", requestURL, "5 minutes")
+		case errors.As(err, &opErr) && opErr.Op == "dial":
+			return "", fmt.Errorf("couldn't reach an LLM server at %s\nStart one (see README \"LLM server\") or set WHATDIDIEVEN_API_URL", requestURL)
+		}
 		return "", err
 	}
 
