@@ -120,6 +120,8 @@ type Config struct {
 	Repos           []string `json:"repos"`
 	BreakGapMinutes int      `json:"break_gap_minutes,omitempty"`
 	LeadInMinutes   int      `json:"lead_in_minutes,omitempty"`
+	APIURL          string   `json:"api_url,omitempty"`
+	Model           string   `json:"model,omitempty"`
 }
 
 type Window struct {
@@ -641,11 +643,17 @@ func main() {
 
 	requestURL := os.Getenv("WHATDIDIEVEN_API_URL")
 	if requestURL == "" {
-		requestURL = "http://localhost:8080/v1/chat/completions"
+		requestURL = config.APIURL
+		if requestURL == "" {
+			requestURL = "http://localhost:8080/v1/chat/completions"
+		}
 	}
 	model := os.Getenv("WHATDIDIEVEN_MODEL")
 	if model == "" {
-		model = "local-model"
+		model = config.Model
+		if model == "" {
+			model = "local-model"
+		}
 	}
 
 	var b strings.Builder

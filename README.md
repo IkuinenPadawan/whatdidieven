@@ -83,6 +83,7 @@ whatdidieven yesterday  # commits from yesterday
 whatdidieven this-week  # commits since this week's Monday
 whatdidieven last-week  # commits from last Monday to Sunday
 whatdidieven add        # adds the current working directory git repo to config
+whatdidieven --dry-run  # print context that would be sent to LLM without LLM call
 ```
 
 That's it. Output goes to stdout, so you can pipe it anywhere.
@@ -114,6 +115,8 @@ Available keys:
 | `repos` | `[]` | Repositories to include. If empty, the current working directory is used. |
 | `break_gap_minutes` | `120` | A gap between two commits longer than this counts as a break, not work time. |
 | `lead_in_minutes` | `30` | Time credited to the first commit of a day, and to the first commit after a break. |
+| `api_url` | `http://localhost:8080/v1/chat/completions` | Chat completions endpoint of your LLM server. `WHATDIDIEVEN_API_URL` overrides it. |
+| `model` | `local-model` | Model name sent in the request. `WHATDIDIEVEN_MODEL` overrides it. |
 
 Add current working directory git repo to the config:
 ```sh
@@ -137,21 +140,27 @@ All repos are queried for the same time window. Commits are merged and grouped p
 
 ### Custom endpoint
 
-Set `WHATDIDIEVEN_API_URL` to point at a server on a different host or port:
+Set `api_url` in `config.json` to point at a server on a different host or port:
+
+```json
+{ "api_url": "http://192.168.1.50:11434/v1/chat/completions", "model": "your-model-name" }
+```
+
+Environment variables take priority over the config file, which is handy for one-off runs:
 
 ```sh
 export WHATDIDIEVEN_API_URL=http://192.168.1.50:11434/v1/chat/completions
 whatdidieven today
 ```
 
-For endpoints that require authentication, set `WHATDIDIEVEN_API_KEY`. The key is sent as a Bearer token in the `Authorization` header:
+For endpoints that require authentication, set `WHATDIDIEVEN_API_KEY`. It is environment-only and never read from the config file, so it can't end up in a file you commit or share. The key is sent as a Bearer token in the `Authorization` header:
 
 ```sh
 export WHATDIDIEVEN_API_KEY=your-api-key
 whatdidieven today
 ```
 
-To choose the model sent in the API request, set `WHATDIDIEVEN_MODEL`:
+To choose the model sent in the API request, set `model` in the config or `WHATDIDIEVEN_MODEL`:
 
 ```sh
 export WHATDIDIEVEN_MODEL='your-model-name'
@@ -165,14 +174,14 @@ If unset, the request uses `local-model`.
 1. Runs `git log --branches --remotes --no-merges --numstat --source` per repo for the requested window (padded by a couple of days, then filtered by author date). The author is read from `git config user.email` (checked per-repo, so a repo-local override is respected), which filters the log to your own commits. `user.email` must be set, or that repo errors out.
 2. Sorts commits by time and calculates a duration for each: the gap to the previous commit, or the lead-in time for the first commit of a day or after a gap longer than the break gap. The durations sum to the day's total time.
 3. Builds one input per day with the repo, branch, time range, duration, subject, body (capped at 20 lines) and changed files of every commit.
-4. POSTs each day to `http://localhost:8080/v1/chat/completions` with a system prompt tuned for timesheet generation. If there are no commits in the window, it prints "No commits in the requested window." without calling the LLM.
+4. POSTs each day to the configured endpoint (default `http://localhost:8080/v1/chat/completions`) with a system prompt tuned for timesheet generation. If there are no commits in the window, it prints "No commits in the requested window." without calling the LLM.
 5. Prints the model's reply for each day.
 
 The LLM groups commits into tasks, extracts ticket numbers (also from branch names), writes business-value descriptions, and rounds task hours to 0.5h so they add up to the calculated day total. Guesses are marked with `(?)`. Line counts help it understand what a commit did, but are never used to estimate time. See [`main.go`](./main.go) for the full prompt.
 
 ## LLM server
 
-Point any OpenAI-compatible server at port `8080` (or set `WHATDIDIEVEN_API_URL` to override the endpoint). A reasonable starting setup:
+Point any OpenAI-compatible server at port `8080` (or set `api_url` in the config or `WHATDIDIEVEN_API_URL` to override the endpoint). A reasonable starting setup:
 
 For example: https://llama.app/docs/serve
 
@@ -183,7 +192,7 @@ llama serve -hf ggml-org/gemma-4-e4b-it-GGUF:Q4_0
 # From a local GGUF file
 llama serve -m my-model.gguf
 ```
-The request sends the model from `WHATDIDIEVEN_MODEL` (default: `local-model`) and `temperature: 0.2`. Most local servers ignore the model field and serve whatever you loaded.
+The request sends the model from `WHATDIDIEVEN_MODEL` or the config's `model` (default: `local-model`) and `temperature: 0.2`. Most local servers ignore the model field and serve whatever you loaded.
 
 ## License
 
